@@ -55,7 +55,20 @@ on stderr — it will not fall back to a weaker scanner and report misleadingly 
 
 ## Install into opencode
 
-Two mechanisms, used together. The instructions file guarantees the constitution is *always* enforced; the MCP server provides on-demand structured lookup and mechanical verification.
+Two mechanisms, used together. The instructions file injects the constitution into the system
+prompt of every session, for every configured model; the MCP server provides on-demand
+structured lookup and mechanical verification.
+
+Injection is not enforcement. `instructions` is system-prompt text, and whether a model
+*follows* it is a property of that model, not of this repo — only the MCP scanner performs a
+mechanical check. Two caveats worth knowing before you rely on it:
+
+- **Small-context models can choke on the payload.** `DIRECTIVES.md` is a substantial system
+  prompt; on a 16k-context deployment (tested: Azure Phi-4) sessions hung rather than degrading
+  gracefully. Prefer models with a large context window, or trim `DIRECTIVES.md` for small ones.
+- **Compliance is per-model and worth spot-checking.** Verified by direct observation on
+  OpenAI- and Anthropic-adapter models, which reproduced gate and law text verbatim on request.
+  That is a sample, not a proof across every provider — re-verify on yours.
 
 Add to `~/.config/opencode/opencode.json` (or `opencode.jsonc`), replacing `<REPO>` with the absolute path to this clone:
 
@@ -110,7 +123,9 @@ Any client that speaks MCP over stdio works. Claude Desktop (`claude_desktop_con
 
 ### `section` values for `get_constitution`
 
-`toc` · `preamble` · `identity` · `anti-deception` · `intelligence-architecture` · `t-shape` · `swebok` · `hive-mind` · `iteration-protocol` · `agentic-pathway` · `power-of-10` · `operational-directives` · `knowledge-graph` · `invariants` · `references` · `full`
+`toc` · `preamble` · `identity` · `anti-deception` · `intelligence-architecture` · `t-shape` · `swebok` · `consensus-protocol` · `iteration-protocol` · `agentic-pathway` · `power-of-10` · `operational-directives` · `knowledge-graph` · `invariants` · `references` · `full`
+
+(`hive-mind` is still accepted as a deprecated alias for `consensus-protocol`.)
 
 ### The scanner
 

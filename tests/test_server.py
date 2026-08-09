@@ -13,6 +13,7 @@ Dependencies: Python 3.9+ standard library only.
 """
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -151,9 +152,22 @@ class TestMarkdownExtraction(unittest.TestCase):
                 self.assertIsNotNone(extracted, f"section '{key}' ({prefix}) not found")
                 self.assertGreater(len(extracted), 200, f"section '{key}' suspiciously short")
 
-    def test_all_eighteen_knowledge_areas_resolve(self):
-        import re
+    def test_deprecated_section_aliases_still_resolve(self):
+        for old, new in server.DEPRECATED_SECTION_ALIASES.items():
+            with self.subTest(alias=old):
+                self.assertIn(new, server.SECTION_MAP, f"alias '{old}' targets unknown key '{new}'")
+                self.assertNotIn(old, server.SECTION_MAP, f"deprecated '{old}' must stay out of the enum")
+                self.assertEqual(
+                    server.tool_get_constitution(self.text, {"section": old}),
+                    server.tool_get_constitution(self.text, {"section": new}),
+                )
 
+    def test_swebok_new_in_v4_labels_match_the_actual_three(self):
+        """SWEBOK v4 added exactly three KAs. Mislabelling others is a factual error."""
+        labelled = re.findall(r"^### (KA-\d+)[^\n]*\(NEW IN v4\)", self.text, re.MULTILINE)
+        self.assertEqual(sorted(labelled), ["KA-02", "KA-06", "KA-13"])
+
+    def test_all_eighteen_knowledge_areas_resolve(self):
         for number in range(1, 19):
             with self.subTest(ka=number):
                 extracted = server.find_subsection(self.text, re.compile(rf"^KA-{number:02d}\b"))

@@ -77,7 +77,7 @@ SECTION_MAP = {
     "intelligence-architecture": "PART III",
     "t-shape": "PART IV",
     "swebok": "PART V",
-    "hive-mind": "PART VI",
+    "consensus-protocol": "PART VI",
     "iteration-protocol": "PART VII",
     "agentic-pathway": "PART VIII",
     "power-of-10": "PART IX",
@@ -85,6 +85,13 @@ SECTION_MAP = {
     "knowledge-graph": "APPENDIX A",
     "invariants": "APPENDIX B",
     "references": "REFERENCES",
+}
+
+# Renamed section keys. Accepted on input so existing callers keep working, but
+# deliberately excluded from SECTION_MAP so they stay out of the advertised enum
+# and the table of contents.
+DEPRECATED_SECTION_ALIASES = {
+    "hive-mind": "consensus-protocol",
 }
 
 VERIFICATION_GATES = """THE FIVE VERIFICATION GATES (all must pass before any code output is emitted;
@@ -204,8 +211,10 @@ def find_subsection(text, pattern):
 # own prose rules for Class 2 / Class 5 narrative deferral, which CSI does
 # not model. `scan_code` and `PROSE_RULES` are imported at module load.
 #
-# Measured on an adversarial 26-case corpus: CodebaseCSI alone 50%,
-# the prior regex-only scanner 17%, the union 96%.
+# Measured on the adversarial 27-case corpus in tools/benchmark_scanner.py:
+# CodebaseCSI alone 13/27 (48%), prose rules alone 20/27 (74%), the union
+# 26/27 (96%). Reproduce with `python tools/benchmark_scanner.py`; do not
+# edit these numbers without rerunning it.
 
 MAX_SCAN_BYTES = 2_000_000
 
@@ -232,6 +241,7 @@ def tool_get_constitution(constitution, args):
             lines.append("")
             lines.append(supreme)
         return "\n".join(lines)
+    section = DEPRECATED_SECTION_ALIASES.get(section, section)
     prefix = SECTION_MAP.get(section)
     if prefix is None:
         valid = ", ".join(list(SECTION_MAP) + ["full", "toc"])

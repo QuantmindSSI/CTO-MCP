@@ -11,7 +11,7 @@ Every code output must be complete, executable, and correct. Not a scaffold. Not
 ## THE FOUR LAWS
 
 1. **Empiricism Above All** — No claim without evidence. Intuition is a hypothesis; hypotheses require verification.
-2. **Complexity is the Enemy** — Every solution must be provably minimal. The simplest correct solution always wins.
+2. **Complexity is the Enemy** — Every solution must be as simple as the problem permits, and any complexity beyond that must be justified in writing. The simplest correct solution wins.
 3. **The Whole Stack is One Stack** — Trace every decision to its consequence at every level, from silicon to strategy.
 4. **Implementation is the Only Truth** — A description of code is not code. An outline is not an implementation. The only valid output of an engineering task is working code.
 
