@@ -26,12 +26,15 @@ CTO-MCP/
 ├── persona_constitution/
 │   ├── __init__.py          Package API re-exports
 │   ├── scanner.py           Detection engine: CodebaseCSI + prose rules + Python AST
-│   └── server.py            MCP server: JSON-RPC 2.0 over stdio
-├── data/
-│   ├── CONSTITUTION.md      Full constitution (the served corpus)
-│   └── DIRECTIVES.md        Distilled directives for system-prompt injection
+│   ├── server.py            MCP server: JSON-RPC 2.0 over stdio
+│   └── data/                Ships inside the package, so an installed copy works
+│       ├── CONSTITUTION.md  Full constitution (the served corpus)
+│       └── DIRECTIVES.md    Distilled directives for system-prompt injection
 ├── tests/
-│   └── test_server.py       74 tests: unit + end-to-end stdio transport
+│   └── test_server.py       79 tests: unit + end-to-end stdio transport
+├── tools/
+│   └── benchmark_scanner.py Reproducible scanner accuracy benchmark
+├── LICENSE
 ├── pyproject.toml
 └── README.md
 ```
@@ -76,7 +79,7 @@ Add to `~/.config/opencode/opencode.json` (or `opencode.jsonc`), replacing `<REP
 {
   "$schema": "https://opencode.ai/config.json",
 
-  "instructions": ["<REPO>/data/DIRECTIVES.md"],
+  "instructions": ["<REPO>/persona_constitution/data/DIRECTIVES.md"],
 
   "mcp": {
     "persona-constitution": {
@@ -201,7 +204,7 @@ Run before emitting any code. All five must pass; if any fails, regenerate from 
 
 | Variable | Effect |
 |---|---|
-| `PERSONA_CONSTITUTION_PATH` | Absolute path to an alternative `CONSTITUTION.md`. Defaults to `<repo>/data/CONSTITUTION.md`. |
+| `PERSONA_CONSTITUTION_PATH` | Absolute path to an alternative `CONSTITUTION.md`. Defaults to the copy shipped inside the package, `persona_constitution/data/CONSTITUTION.md`. |
 
 The server exits with status `1` and a message on **stderr** if the constitution file is missing or empty — a broken install fails loudly rather than silently serving nothing.
 
@@ -212,7 +215,7 @@ The server exits with status `1` and a message on **stderr** if the constitution
 Run from the repo root, using the virtualenv interpreter:
 
 ```bash
-.venv/bin/python -m unittest discover -s tests -v   # 74 tests
+.venv/bin/python -m unittest discover -s tests -v   # 79 tests
 ```
 
 Coverage spans three layers:
@@ -239,6 +242,15 @@ The structural detection half of `scan_code_for_violations` is provided by
 **[CodebaseCSI](https://github.com/Thundastormgod/CodebaseCSI)**, used under the MIT License.
 This project adds the MCP interface, the Constitution corpus, the Class 2 / Class 5 prose
 rules, the cross-language structural rules, and the Python AST false-positive suppression.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+CodebaseCSI is also MIT, and its license text is reproduced verbatim in the `LICENSE` file
+under *Third-Party Components*, as its terms require.
 
 ---
 

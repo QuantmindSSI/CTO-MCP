@@ -22,7 +22,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SERVER_PATH = PROJECT_ROOT / "persona_constitution" / "server.py"
-CONSTITUTION_PATH = PROJECT_ROOT / "data" / "CONSTITUTION.md"
+CONSTITUTION_PATH = PROJECT_ROOT / "persona_constitution" / "data" / "CONSTITUTION.md"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -138,6 +138,24 @@ class TestConstitutionLoading(unittest.TestCase):
                     del os.environ["PERSONA_CONSTITUTION_PATH"]
                 else:
                     os.environ["PERSONA_CONSTITUTION_PATH"] = previous
+
+    def test_data_ships_inside_the_package(self):
+        """A pip-installed server has no repo root, so the data must live in the
+        package. If this fails, `pip install` produces a server that cannot start."""
+        self.assertTrue(
+            server.DEFAULT_CONSTITUTION_PATH.is_file(),
+            f"packaged constitution missing at {server.DEFAULT_CONSTITUTION_PATH}",
+        )
+        self.assertEqual(server.DEFAULT_CONSTITUTION_PATH.parent.parent.name, "persona_constitution")
+        self.assertTrue(server.DEFAULT_DIRECTIVES_PATH.is_file())
+
+    def test_packaged_copy_wins_over_legacy_location(self):
+        self.assertEqual(server.resolve_constitution_path(), server.DEFAULT_CONSTITUTION_PATH)
+
+    def test_package_data_glob_is_declared(self):
+        """The wheel only carries the data if pyproject declares it."""
+        pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        self.assertRegex(pyproject, r'persona_constitution\s*=\s*\[\s*"data/\*\.md"\s*\]')
 
 
 class TestMarkdownExtraction(unittest.TestCase):

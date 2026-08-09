@@ -24,7 +24,10 @@ Diagnostics go to stderr only; stdout carries protocol frames exclusively.
 
 Data source resolution order for CONSTITUTION.md:
   1. PERSONA_CONSTITUTION_PATH environment variable, if set.
-  2. <project root>/data/CONSTITUTION.md, resolved relative to this file.
+  2. persona_constitution/data/CONSTITUTION.md, shipped inside the package so
+     that an installed copy (pip install) carries its own data.
+  3. <project root>/data/CONSTITUTION.md - the pre-3.1 layout, still honoured
+     so that existing checkouts and configs do not break.
 """
 
 import json
@@ -58,8 +61,17 @@ except ImportError:
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "persona-constitution", "version": "3.0.0"}
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_CONSTITUTION_PATH = PROJECT_ROOT / "data" / "CONSTITUTION.md"
+PACKAGE_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = PACKAGE_ROOT.parent
+
+# Shipped inside the package, so `pip install` produces a working server.
+PACKAGE_DATA_DIR = PACKAGE_ROOT / "data"
+DEFAULT_CONSTITUTION_PATH = PACKAGE_DATA_DIR / "CONSTITUTION.md"
+DEFAULT_DIRECTIVES_PATH = PACKAGE_DATA_DIR / "DIRECTIVES.md"
+
+# The pre-3.1 location. Kept as a fallback so that a checkout or config still
+# pointing at <project root>/data keeps working after the move.
+LEGACY_CONSTITUTION_PATH = PROJECT_ROOT / "data" / "CONSTITUTION.md"
 
 # JSON-RPC 2.0 error codes.
 PARSE_ERROR = -32700
@@ -127,13 +139,24 @@ PROHIBITED MARKERS (any occurrence means the output has failed):
 def resolve_constitution_path():
     """Return the Path to CONSTITUTION.md.
 
-    Honours the PERSONA_CONSTITUTION_PATH environment variable (expanding `~`
-    and relative segments) so the data file can live outside the repository;
-    otherwise falls back to <project root>/data/CONSTITUTION.md.
+    Resolution order:
+      1. PERSONA_CONSTITUTION_PATH (expanding `~` and relative segments), so the
+         data file can live outside the repository entirely.
+      2. The copy shipped inside the package, which is what an installed
+         (pip install) server uses.
+      3. The pre-3.1 <project root>/data location, so older checkouts still work.
+
+    The legacy path is only returned if it actually exists; otherwise the
+    packaged path is returned so that the "not found" error names the location
+    a correct installation would use.
     """
     override = os.environ.get("PERSONA_CONSTITUTION_PATH")
     if override and override.strip():
         return Path(override).expanduser().resolve()
+    if DEFAULT_CONSTITUTION_PATH.is_file():
+        return DEFAULT_CONSTITUTION_PATH
+    if LEGACY_CONSTITUTION_PATH.is_file():
+        return LEGACY_CONSTITUTION_PATH
     return DEFAULT_CONSTITUTION_PATH
 
 

@@ -7,6 +7,8 @@ name = "persona-constitution-mcp"
 version = "3.0.0"
 description = "MCP server serving the Agentic Engineering Persona constitution: SWEBOK v4.0, NASA Power of 10, Zero Framework Tolerance."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 # Verified by running the full test suite on CPython 3.9.6 and 3.14.6.
 requires-python = ">=3.9"
 
@@ -37,4 +39,7 @@ persona-constitution-mcp = "persona_constitution.server:main"
 packages = ["persona_constitution"]
 
 [tool.setuptools.package-data]
-persona_constitution = []
+# CONSTITUTION.md is not documentation - it is the payload this server exists to
+# serve, and the server refuses to start without it. It must ship inside the
+# wheel. Verified by installing into a clean venv and calling the console script.
+persona_constitution = ["data/*.md"]
