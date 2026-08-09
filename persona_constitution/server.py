@@ -42,11 +42,11 @@ from pathlib import Path
 # dependency is fatal and reported loudly: a silently degraded scanner would
 # report clean results for code it never actually inspected.
 try:
-    from .scanner import PROSE_RULES, scan_code
+    from .scanner import scan_code
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
-        from persona_constitution.scanner import PROSE_RULES, scan_code
+        from persona_constitution.scanner import scan_code
     except ImportError as _scanner_error:
         sys.stderr.write(
             "persona-constitution: FATAL - cannot load the scanner backend: "
@@ -57,7 +57,7 @@ except ImportError:
             "and ensure opencode launches this server with that virtualenv's "
             "python.\n"
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from _scanner_error
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "persona-constitution", "version": "3.0.0"}
@@ -198,7 +198,7 @@ def split_headings(text, level):
         if not in_fence and line.startswith(prefix) and not line.startswith("#" * (level + 1)):
             if current_heading is not None:
                 sections.append((current_heading, "\n".join(current_lines).strip()))
-            current_heading = line[len(prefix):].strip()
+            current_heading = line[len(prefix) :].strip()
             current_lines = []
         elif current_heading is not None:
             current_lines.append(line)
@@ -232,7 +232,8 @@ def find_subsection(text, pattern):
 # The detection engine lives in scanner.py: a union of CodebaseCSI's
 # MockCodeDetector (structural stub/mock detection) and the Constitution's
 # own prose rules for Class 2 / Class 5 narrative deferral, which CSI does
-# not model. `scan_code` and `PROSE_RULES` are imported at module load.
+# not model. `scan_code` is imported at module load; the rules themselves
+# live in scanner.py and are re-exported from the package __init__.
 #
 # Measured on the adversarial 27-case corpus in tools/benchmark_scanner.py:
 # CodebaseCSI alone 13/27 (48%), prose rules alone 20/27 (74%), the union
@@ -267,7 +268,7 @@ def tool_get_constitution(constitution, args):
     section = DEPRECATED_SECTION_ALIASES.get(section, section)
     prefix = SECTION_MAP.get(section)
     if prefix is None:
-        valid = ", ".join(list(SECTION_MAP) + ["full", "toc"])
+        valid = ", ".join([*SECTION_MAP, "full", "toc"])
         raise ValueError(f"Unknown section '{section}'. Valid values: {valid}")
     result = find_section(constitution, prefix)
     if result is None:
@@ -276,14 +277,24 @@ def tool_get_constitution(constitution, args):
 
 
 KA_TITLES = {
-    1: "Software Requirements", 2: "Software Architecture", 3: "Software Design",
-    4: "Software Construction", 5: "Software Testing", 6: "Software Engineering Operations",
-    7: "Software Maintenance", 8: "Software Configuration Management",
-    9: "Software Engineering Management", 10: "Software Engineering Process",
-    11: "Software Engineering Models and Methods", 12: "Software Quality",
-    13: "Software Security", 14: "Software Engineering Professional Practice",
-    15: "Software Engineering Economics", 16: "Computing Foundations",
-    17: "Mathematical Foundations", 18: "Engineering Foundations",
+    1: "Software Requirements",
+    2: "Software Architecture",
+    3: "Software Design",
+    4: "Software Construction",
+    5: "Software Testing",
+    6: "Software Engineering Operations",
+    7: "Software Maintenance",
+    8: "Software Configuration Management",
+    9: "Software Engineering Management",
+    10: "Software Engineering Process",
+    11: "Software Engineering Models and Methods",
+    12: "Software Quality",
+    13: "Software Security",
+    14: "Software Engineering Professional Practice",
+    15: "Software Engineering Economics",
+    16: "Computing Foundations",
+    17: "Mathematical Foundations",
+    18: "Engineering Foundations",
 }
 
 
@@ -327,8 +338,8 @@ def tool_get_power_of_10(constitution, args):
         return part_ix
     try:
         number = int(rule)
-    except (TypeError, ValueError):
-        raise ValueError(f"Invalid rule '{rule}'. Use an integer 1-10, or omit for all rules.")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid rule '{rule}'. Use an integer 1-10, or omit for all rules.") from exc
     if not 1 <= number <= 10:
         raise ValueError(f"Rule number {number} out of range. Power of 10 rules are numbered 1-10.")
     pattern = re.compile(rf"^Rule {number}\b")
@@ -338,13 +349,20 @@ def tool_get_power_of_10(constitution, args):
     return result
 
 
-def tool_get_verification_gates(constitution, args):
-    """Return the G1-G5 gates plus the prohibited-marker checklist."""
+def tool_get_verification_gates(constitution, args):  # noqa: ARG001 - uniform handler signature
+    """Return the G1-G5 gates plus the prohibited-marker checklist.
+
+    Takes `constitution` and `args` it does not read: every tool handler shares
+    one signature so `dispatch` can invoke them without special-casing.
+    """
     return VERIFICATION_GATES
 
 
-def tool_scan_code_for_violations(constitution, args):
-    """Run the static Zero-Framework-Tolerance scan over the supplied code."""
+def tool_scan_code_for_violations(constitution, args):  # noqa: ARG001 - uniform handler signature
+    """Run the static Zero-Framework-Tolerance scan over the supplied code.
+
+    `constitution` is unused: the scan is purely static and needs no corpus.
+    """
     code = args.get("code")
     if not isinstance(code, str) or not code.strip():
         raise ValueError("Argument 'code' is required and must be a non-empty string.")
@@ -373,7 +391,7 @@ TOOLS = {
             "properties": {
                 "section": {
                     "type": "string",
-                    "enum": list(SECTION_MAP) + ["full", "toc"],
+                    "enum": [*SECTION_MAP, "full", "toc"],
                     "description": "Which section to return. Omit (or 'toc') for the table of contents plus the Preamble/Supreme Law.",
                 },
             },
@@ -478,17 +496,20 @@ def handle_initialize(params, request_id, _constitution):
     client_version = params.get("protocolVersion", PROTOCOL_VERSION)
     # Echo the client's requested version when it is a string; otherwise offer ours.
     version = client_version if isinstance(client_version, str) else PROTOCOL_VERSION
-    return make_result(request_id, {
-        "protocolVersion": version,
-        "capabilities": {"tools": {}},
-        "serverInfo": SERVER_INFO,
-        "instructions": (
-            "This server carries the Agentic Engineering Persona constitution governing all "
-            "programming tasks. Core mandate: every code output must be complete, executable, "
-            "and correct - no placeholders, no TODOs, no scaffolds. Use scan_code_for_violations "
-            "on generated code and get_verification_gates before delivery."
-        ),
-    })
+    return make_result(
+        request_id,
+        {
+            "protocolVersion": version,
+            "capabilities": {"tools": {}},
+            "serverInfo": SERVER_INFO,
+            "instructions": (
+                "This server carries the Agentic Engineering Persona constitution governing all "
+                "programming tasks. Core mandate: every code output must be complete, executable, "
+                "and correct - no placeholders, no TODOs, no scaffolds. Use scan_code_for_violations "
+                "on generated code and get_verification_gates before delivery."
+            ),
+        },
+    )
 
 
 def handle_tools_list(_params, request_id, _constitution):
@@ -513,7 +534,9 @@ def handle_tools_call(params, request_id, constitution):
     except ValueError as exc:
         # Tool-level errors are reported inside the result per MCP convention,
         # so the model can read and correct its arguments.
-        return make_result(request_id, {"content": [{"type": "text", "text": f"Error: {exc}"}], "isError": True})
+        return make_result(
+            request_id, {"content": [{"type": "text", "text": f"Error: {exc}"}], "isError": True}
+        )
 
 
 def handle_ping(_params, request_id, _constitution):
@@ -532,8 +555,11 @@ def dispatch(message, constitution):
     """Route one parsed JSON-RPC message. Returns a response dict or None
     (None for notifications, which must not receive responses)."""
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
-        return make_error(message.get("id") if isinstance(message, dict) else None,
-                          INVALID_REQUEST, "Not a valid JSON-RPC 2.0 message.")
+        return make_error(
+            message.get("id") if isinstance(message, dict) else None,
+            INVALID_REQUEST,
+            "Not a valid JSON-RPC 2.0 message.",
+        )
     method = message.get("method")
     request_id = message.get("id")
     is_notification = "id" not in message
@@ -543,7 +569,11 @@ def dispatch(message, constitution):
         return None
     handler = REQUEST_HANDLERS.get(method)
     if handler is None:
-        return None if is_notification else make_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+        return (
+            None
+            if is_notification
+            else make_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+        )
     params = message.get("params") or {}
     if not isinstance(params, dict):
         return make_error(request_id, INVALID_PARAMS, "params must be an object.")

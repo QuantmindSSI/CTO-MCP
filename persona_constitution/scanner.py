@@ -102,61 +102,181 @@ def _csi_severity(severity, confidence):
 # suppressed inside data strings, "structure" rules are always evaluated.
 PROSE_RULES = [
     # -- Class 2: Scaffold Deception -------------------------------------
-    (re.compile(r"rest\s+of\s+the\s+(?:implementation|code|file|logic|method|function)", re.IGNORECASE),
-     CLASS_SCAFFOLD, "'rest of the implementation ...' - code omitted", "violation", "prose"),
-    (re.compile(r"follows?\s+the\s+same\s+pattern", re.IGNORECASE),
-     CLASS_SCAFFOLD, "'follows the same pattern' - code omitted by analogy", "violation", "prose"),
-    (re.compile(r"(?:omitted|elided|truncated|abbreviated|snipped|skipped)\s+for\s+brevity", re.IGNORECASE),
-     CLASS_SCAFFOLD, "Content omitted 'for brevity'", "violation", "prose"),
-    (re.compile(r"for\s+brevity[,\s]+(?:the\s+)?(?:rest|remainder|others?|implementation)", re.IGNORECASE),
-     CLASS_SCAFFOLD, "Content omitted 'for brevity'", "violation", "prose"),
-    (re.compile(r"and\s+so\s+on\s+for\s+the\s+(?:rest|others|remaining)", re.IGNORECASE),
-     CLASS_SCAFFOLD, "'and so on for the rest' - enumeration left unwritten", "violation", "prose"),
-    (re.compile(r"(?:similar|same)\s+(?:for|logic\s+for)\s+the\s+(?:other|remaining|rest)", re.IGNORECASE),
-     CLASS_SCAFFOLD, "'similar for the others' - code omitted by analogy", "violation", "prose"),
+    (
+        re.compile(r"rest\s+of\s+the\s+(?:implementation|code|file|logic|method|function)", re.IGNORECASE),
+        CLASS_SCAFFOLD,
+        "'rest of the implementation ...' - code omitted",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"follows?\s+the\s+same\s+pattern", re.IGNORECASE),
+        CLASS_SCAFFOLD,
+        "'follows the same pattern' - code omitted by analogy",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(
+            r"(?:omitted|elided|truncated|abbreviated|snipped|skipped)\s+for\s+brevity", re.IGNORECASE
+        ),
+        CLASS_SCAFFOLD,
+        "Content omitted 'for brevity'",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"for\s+brevity[,\s]+(?:the\s+)?(?:rest|remainder|others?|implementation)", re.IGNORECASE),
+        CLASS_SCAFFOLD,
+        "Content omitted 'for brevity'",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"and\s+so\s+on\s+for\s+the\s+(?:rest|others|remaining)", re.IGNORECASE),
+        CLASS_SCAFFOLD,
+        "'and so on for the rest' - enumeration left unwritten",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"(?:similar|same)\s+(?:for|logic\s+for)\s+the\s+(?:other|remaining|rest)", re.IGNORECASE),
+        CLASS_SCAFFOLD,
+        "'similar for the others' - code omitted by analogy",
+        "violation",
+        "prose",
+    ),
     # -- Class 5: Iteration Deferral -------------------------------------
-    (re.compile(r"left\s+as\s+an\s+exercise", re.IGNORECASE),
-     CLASS_DEFERRAL, "'left as an exercise' - work pushed to the reader", "violation", "prose"),
-    (re.compile(r"you\s+can\s+(?:extend|expand|build\s+on|adapt)\s+this", re.IGNORECASE),
-     CLASS_DEFERRAL, "'you can extend this' - verbal handoff instead of implementation", "violation", "prose"),
-    (re.compile(r"(?:this\s+is\s+(?:just\s+)?a|as\s+a)\s+(?:good\s+)?starting\s+point", re.IGNORECASE),
-     CLASS_DEFERRAL, "'starting point' framing - partial solution offered as complete", "violation", "prose"),
-    (re.compile(r"you\s+(?:would|will|may|might|could)\s+want\s+to\s+add", re.IGNORECASE),
-     CLASS_DEFERRAL, "'you would want to add ...' - known gap left open", "violation", "prose"),
-    (re.compile(r"(?:full|complete|real|actual|production)\s+implementation\s+would", re.IGNORECASE),
-     CLASS_DEFERRAL, "'the full implementation would ...' - admission of incompleteness", "violation", "prose"),
-    (re.compile(r"in\s+(?:a\s+)?production[,\s]+you\s+(?:would|should|d\b)", re.IGNORECASE),
-     CLASS_DEFERRAL, "'in production you would ...' - non-production code delivered", "violation", "prose"),
-    (re.compile(r"\bXXX\b"),
-     CLASS_FRAMEWORK, "XXX marker: unresolved issue left in code", "warning", "marker"),
-    (re.compile(r"(?://|#|/\*|<!--|--)\s*(?:implement|add|insert|write|fill)\b.{0,40}\b(?:logic|code|here|this|later|in)\b",
-                re.IGNORECASE),
-     CLASS_FRAMEWORK, "Comment describing unwritten implementation", "violation", "marker"),
-    (re.compile(r"your\s+code\s+(?:goes\s+)?here", re.IGNORECASE),
-     CLASS_FRAMEWORK, "'your code here' placeholder", "violation", "marker"),
+    (
+        re.compile(r"left\s+as\s+an\s+exercise", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'left as an exercise' - work pushed to the reader",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"you\s+can\s+(?:extend|expand|build\s+on|adapt)\s+this", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'you can extend this' - verbal handoff instead of implementation",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"(?:this\s+is\s+(?:just\s+)?a|as\s+a)\s+(?:good\s+)?starting\s+point", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'starting point' framing - partial solution offered as complete",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"you\s+(?:would|will|may|might|could)\s+want\s+to\s+add", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'you would want to add ...' - known gap left open",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"(?:full|complete|real|actual|production)\s+implementation\s+would", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'the full implementation would ...' - admission of incompleteness",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"in\s+(?:a\s+)?production[,\s]+you\s+(?:would|should|d\b)", re.IGNORECASE),
+        CLASS_DEFERRAL,
+        "'in production you would ...' - non-production code delivered",
+        "violation",
+        "prose",
+    ),
+    (
+        re.compile(r"\bXXX\b"),
+        CLASS_FRAMEWORK,
+        "XXX marker: unresolved issue left in code",
+        "warning",
+        "marker",
+    ),
+    (
+        re.compile(
+            r"(?://|#|/\*|<!--|--)\s*(?:implement|add|insert|write|fill)\b.{0,40}\b(?:logic|code|here|this|later|in)\b",
+            re.IGNORECASE,
+        ),
+        CLASS_FRAMEWORK,
+        "Comment describing unwritten implementation",
+        "violation",
+        "marker",
+    ),
+    (
+        re.compile(r"your\s+code\s+(?:goes\s+)?here", re.IGNORECASE),
+        CLASS_FRAMEWORK,
+        "'your code here' placeholder",
+        "violation",
+        "marker",
+    ),
     # -- Structural stubs in brace languages (CSI is Python-centric) ------
-    (re.compile(r"\b(?:func|function|fn|def)\s+\w+\s*\([^)]*\)[^{;]*\{[\s\n]*\}"),
-     CLASS_FRAMEWORK, "Function declared with an entirely empty body", "violation", "structure"),
-    (re.compile(r"(?m)^[ \t]*(?:(?:public|private|protected|internal|static|final|override|async|virtual)\s+)+"
-                r"[\w<>\[\],.?]+\s+\w+\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\{[\s\n]*\}"),
-     CLASS_FRAMEWORK, "Method declared with an entirely empty body", "violation", "structure"),
-    (re.compile(r"\{[\s\n]*return\s+(?:null|nil|undefined|None|0|\"\"|''|false|true)\s*;?[\s\n]*\}"),
-     CLASS_FRAMEWORK, "Function body is a single hardcoded return - no implementation", "warning", "structure"),
-    (re.compile(r"catch\s*(?:\([^)]*\))?\s*\{[\s\n]*(?:/\*.*?\*/|//[^\n]*)?[\s\n]*\}", re.DOTALL),
-     CLASS_CONFIDENCE, "Empty catch block: silently swallowed exception", "violation", "structure"),
-    (re.compile(r"throw\s+new\s+\w*(?:Error|Exception)\s*\(\s*['\"][^'\"]*"
-                r"(?:not\s*implemented|unimplemented|not\s*supported|TODO)", re.IGNORECASE),
-     CLASS_FRAMEWORK, "'not implemented' exception stub", "violation", "structure"),
-    (re.compile(r"panic\s*\(\s*[\"`][^\"`]*(?:not\s*implemented|unimplemented|TODO)", re.IGNORECASE),
-     CLASS_FRAMEWORK, "Go panic() used as an unimplemented stub", "violation", "structure"),
-    (re.compile(r"\b(?:unimplemented!|todo!)\s*\("),
-     CLASS_FRAMEWORK, "Rust unimplemented!()/todo!() macro stub", "violation", "structure"),
+    (
+        re.compile(r"\b(?:func|function|fn|def)\s+\w+\s*\([^)]*\)[^{;]*\{[\s\n]*\}"),
+        CLASS_FRAMEWORK,
+        "Function declared with an entirely empty body",
+        "violation",
+        "structure",
+    ),
+    (
+        re.compile(
+            r"(?m)^[ \t]*(?:(?:public|private|protected|internal|static|final|override|async|virtual)\s+)+"
+            r"[\w<>\[\],.?]+\s+\w+\s*\([^)]*\)\s*(?:throws\s+[\w,\s]+)?\{[\s\n]*\}"
+        ),
+        CLASS_FRAMEWORK,
+        "Method declared with an entirely empty body",
+        "violation",
+        "structure",
+    ),
+    (
+        re.compile(r"\{[\s\n]*return\s+(?:null|nil|undefined|None|0|\"\"|''|false|true)\s*;?[\s\n]*\}"),
+        CLASS_FRAMEWORK,
+        "Function body is a single hardcoded return - no implementation",
+        "warning",
+        "structure",
+    ),
+    (
+        re.compile(r"catch\s*(?:\([^)]*\))?\s*\{[\s\n]*(?:/\*.*?\*/|//[^\n]*)?[\s\n]*\}", re.DOTALL),
+        CLASS_CONFIDENCE,
+        "Empty catch block: silently swallowed exception",
+        "violation",
+        "structure",
+    ),
+    (
+        re.compile(
+            r"throw\s+new\s+\w*(?:Error|Exception)\s*\(\s*['\"][^'\"]*"
+            r"(?:not\s*implemented|unimplemented|not\s*supported|TODO)",
+            re.IGNORECASE,
+        ),
+        CLASS_FRAMEWORK,
+        "'not implemented' exception stub",
+        "violation",
+        "structure",
+    ),
+    (
+        re.compile(r"panic\s*\(\s*[\"`][^\"`]*(?:not\s*implemented|unimplemented|TODO)", re.IGNORECASE),
+        CLASS_FRAMEWORK,
+        "Go panic() used as an unimplemented stub",
+        "violation",
+        "structure",
+    ),
+    (
+        re.compile(r"\b(?:unimplemented!|todo!)\s*\("),
+        CLASS_FRAMEWORK,
+        "Rust unimplemented!()/todo!() macro stub",
+        "violation",
+        "structure",
+    ),
 ]
 
 
 # --------------------------------------------------------------------------
 # Python AST and token analysis
 # --------------------------------------------------------------------------
+
 
 def _line_offsets(code):
     """Return a list mapping 1-based line number to its start char offset."""
@@ -188,8 +308,11 @@ def _python_data_string_spans(code):
             if not body:
                 continue
             first = body[0]
-            if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
-                    and isinstance(first.value.value, str)):
+            if (
+                isinstance(first, ast.Expr)
+                and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)
+            ):
                 docstring_spans.add((first.value.lineno, first.value.col_offset))
 
     offsets = _line_offsets(code)
@@ -246,16 +369,18 @@ def _generic_data_string_spans(code):
 
 def _in_spans(position, spans):
     """True if char offset `position` falls inside any (start, end) span."""
-    for start, end in spans:
-        if start <= position < end:
-            return True
-    return False
+    return any(start <= position < end for start, end in spans)
 
 
-_ABSTRACT_DECORATORS = frozenset({
-    "abstractmethod", "abstractproperty", "overload",
-    "abc.abstractmethod", "typing.overload",
-})
+_ABSTRACT_DECORATORS = frozenset(
+    {
+        "abstractmethod",
+        "abstractproperty",
+        "overload",
+        "abc.abstractmethod",
+        "typing.overload",
+    }
+)
 _ABSTRACT_BASES = frozenset({"Protocol", "ABC", "ABCMeta", "typing.Protocol", "abc.ABC"})
 
 
@@ -284,17 +409,23 @@ def _base_name(node):
 def _body_is_trivial(body):
     """True if a function body is only pass, ..., or a docstring plus those."""
     statements = list(body)
-    if (statements and isinstance(statements[0], ast.Expr)
-            and isinstance(statements[0].value, ast.Constant)
-            and isinstance(statements[0].value.value, str)):
+    if (
+        statements
+        and isinstance(statements[0], ast.Expr)
+        and isinstance(statements[0].value, ast.Constant)
+        and isinstance(statements[0].value.value, str)
+    ):
         statements = statements[1:]
     if not statements:
         return True
     for statement in statements:
         if isinstance(statement, ast.Pass):
             continue
-        if (isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant)
-                and statement.value.value is Ellipsis):
+        if (
+            isinstance(statement, ast.Expr)
+            and isinstance(statement.value, ast.Constant)
+            and statement.value.value is Ellipsis
+        ):
             continue
         return False
     return True
@@ -330,33 +461,41 @@ def _python_ast_findings(code):
             decorators = {_decorator_name(d) for d in node.decorator_list}
             if decorators & _ABSTRACT_DECORATORS or node.lineno in abstract_class_lines:
                 continue
-            findings.append({
-                "line": node.lineno,
-                "class": CLASS_FRAMEWORK,
-                "finding": f"Function '{node.name}' has no implementation (body is pass/... only)",
-                "severity": "violation",
-                "source": "constitution-ast",
-            })
+            findings.append(
+                {
+                    "line": node.lineno,
+                    "class": CLASS_FRAMEWORK,
+                    "finding": f"Function '{node.name}' has no implementation (body is pass/... only)",
+                    "severity": "violation",
+                    "source": "constitution-ast",
+                }
+            )
         elif isinstance(node, ast.ExceptHandler):
             if not all(isinstance(statement, ast.Pass) for statement in node.body):
                 continue
             if node.type is None:
-                findings.append({
-                    "line": node.lineno,
-                    "class": CLASS_CONFIDENCE,
-                    "finding": "Bare 'except: pass' - every exception silently swallowed",
-                    "severity": "violation",
-                    "source": "constitution-ast",
-                })
+                findings.append(
+                    {
+                        "line": node.lineno,
+                        "class": CLASS_CONFIDENCE,
+                        "finding": "Bare 'except: pass' - every exception silently swallowed",
+                        "severity": "violation",
+                        "source": "constitution-ast",
+                    }
+                )
             else:
-                findings.append({
-                    "line": node.lineno,
-                    "class": CLASS_CONFIDENCE,
-                    "finding": (f"'except {_base_name(node.type) or 'Exception'}: pass' - exception "
-                                "swallowed; confirm this is deliberate and documented"),
-                    "severity": "warning",
-                    "source": "constitution-ast",
-                })
+                findings.append(
+                    {
+                        "line": node.lineno,
+                        "class": CLASS_CONFIDENCE,
+                        "finding": (
+                            f"'except {_base_name(node.type) or 'Exception'}: pass' - exception "
+                            "swallowed; confirm this is deliberate and documented"
+                        ),
+                        "severity": "warning",
+                        "source": "constitution-ast",
+                    }
+                )
     return findings
 
 
@@ -372,6 +511,7 @@ def _has_explanatory_comment(code, line_number):
 # --------------------------------------------------------------------------
 # Engine composition
 # --------------------------------------------------------------------------
+
 
 def _line_text(code, line_number):
     """Return the stripped, truncated text of a 1-based line number."""
@@ -404,15 +544,17 @@ def _csi_findings(code, language):
         pattern_type = getattr(pattern, "pattern_type", None)
         line_number = getattr(pattern, "line_number", 0)
         confidence = getattr(pattern, "confidence", 0.0)
-        findings.append({
-            "line": line_number,
-            "class": _csi_failure_class(pattern_type),
-            "finding": getattr(pattern, "description", pattern_type or "mock pattern"),
-            "severity": _csi_severity(getattr(pattern, "severity", ""), confidence),
-            "source": "codebase-csi",
-            "confidence": round(float(confidence), 2),
-            "suggestion": getattr(pattern, "suggestion", ""),
-        })
+        findings.append(
+            {
+                "line": line_number,
+                "class": _csi_failure_class(pattern_type),
+                "finding": getattr(pattern, "description", pattern_type or "mock pattern"),
+                "severity": _csi_severity(getattr(pattern, "severity", ""), confidence),
+                "source": "codebase-csi",
+                "confidence": round(float(confidence), 2),
+                "suggestion": getattr(pattern, "suggestion", ""),
+            }
+        )
     return findings, None
 
 
@@ -424,13 +566,15 @@ def _prose_findings(code, string_spans):
         for match in regex.finditer(code):
             if suppressible and _in_spans(match.start(), string_spans):
                 continue
-            findings.append({
-                "line": code.count("\n", 0, match.start()) + 1,
-                "class": failure_class,
-                "finding": description,
-                "severity": severity,
-                "source": "constitution-prose",
-            })
+            findings.append(
+                {
+                    "line": code.count("\n", 0, match.start()) + 1,
+                    "class": failure_class,
+                    "finding": description,
+                    "severity": severity,
+                    "source": "constitution-prose",
+                }
+            )
     return findings
 
 
@@ -444,9 +588,7 @@ def _deduplicate(findings):
     for finding in findings:
         key = (finding["line"], finding["class"], finding["finding"])
         existing = merged.get(key)
-        if existing is None:
-            merged[key] = finding
-        elif existing["severity"] == "warning" and finding["severity"] == "violation":
+        if existing is None or (existing["severity"] == "warning" and finding["severity"] == "violation"):
             merged[key] = finding
     return list(merged.values())
 
@@ -474,10 +616,7 @@ def scan_code(code, language=None):
     assert isinstance(code, str), "code must be a string"
 
     treat_as_python = _is_python(code, language)
-    if treat_as_python:
-        string_spans = _python_data_string_spans(code)
-    else:
-        string_spans = _generic_data_string_spans(code)
+    string_spans = _python_data_string_spans(code) if treat_as_python else _generic_data_string_spans(code)
 
     findings, csi_error = _csi_findings(code, language)
     findings.extend(_prose_findings(code, string_spans))
@@ -491,9 +630,11 @@ def scan_code(code, language=None):
         for finding in _python_ast_findings(code):
             # A typed `except X: pass` carrying an explanatory comment is a
             # documented deliberate suppression, not an oversight.
-            if (finding["severity"] == "warning"
-                    and finding["class"] == CLASS_CONFIDENCE
-                    and _has_explanatory_comment(code, finding["line"])):
+            if (
+                finding["severity"] == "warning"
+                and finding["class"] == CLASS_CONFIDENCE
+                and _has_explanatory_comment(code, finding["line"])
+            ):
                 continue
             findings.append(finding)
 

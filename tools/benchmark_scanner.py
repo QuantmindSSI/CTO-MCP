@@ -42,7 +42,11 @@ VIOLATIONS = [
     ("not implemented error", "def compute(v):\n    raise NotImplementedError\n", "python"),
     ("always true stub", "def validate(user):\n    return True\n", "python"),
     ("print only stub", 'def save(rec):\n    print("saving", rec)\n', "python"),
-    ("rest of implementation", "def a():\n    return 1\n# rest of the implementation follows the same pattern\n", "python"),
+    (
+        "rest of implementation",
+        "def a():\n    return 1\n# rest of the implementation follows the same pattern\n",
+        "python",
+    ),
     ("left as an exercise", "// Error handling is left as an exercise for the reader\n", "javascript"),
     ("starting point", "# This is a starting point; you can extend this to handle retries\n", "python"),
     ("rust todo macro", "fn parse(s: &str) -> Ast {\n    todo!()\n}\n", "rust"),
@@ -57,20 +61,41 @@ VIOLATIONS = [
 LEGITIMATE = [
     ("react placeholder attr", 'export const F = () => <input placeholder="Enter email" />;\n', "javascript"),
     ("sql bind parameter", 'query = "SELECT * FROM t WHERE id = %s"\n', "python"),
-    ("linter matching TODO",
-     'def check(line):\n    if "TODO" in line:\n        report(line)\n        return 1\n    return 0\n', "python"),
-    ("typing.Protocol stub",
-     "from typing import Protocol\nclass Repo(Protocol):\n    def get(self, k: str) -> bytes:\n        ...\n", "python"),
-    ("abstractmethod stub",
-     "import abc\nclass B(abc.ABC):\n    @abc.abstractmethod\n    def run(self): ...\n", "python"),
-    ("documented except pass",
-     "def shut(sock):\n    try:\n        sock.close()\n    except OSError:\n        pass  # already closed by peer\n", "python"),
-    ("docstring says brevity",
-     'def f(x):\n    """Names are short for brevity."""\n    return x * 2\n', "python"),
-    ("real python function",
-     'def add(a: int, b: int) -> int:\n    if not isinstance(a, int):\n        raise TypeError("a must be int")\n    return a + b\n', "python"),
-    ("real js handler",
-     "function handler(req, res) {\n  const id = req.params.id;\n  res.json({ id });\n}\n", "javascript"),
+    (
+        "linter matching TODO",
+        'def check(line):\n    if "TODO" in line:\n        report(line)\n        return 1\n    return 0\n',
+        "python",
+    ),
+    (
+        "typing.Protocol stub",
+        "from typing import Protocol\nclass Repo(Protocol):\n    def get(self, k: str) -> bytes:\n        ...\n",
+        "python",
+    ),
+    (
+        "abstractmethod stub",
+        "import abc\nclass B(abc.ABC):\n    @abc.abstractmethod\n    def run(self): ...\n",
+        "python",
+    ),
+    (
+        "documented except pass",
+        "def shut(sock):\n    try:\n        sock.close()\n    except OSError:\n        pass  # already closed by peer\n",
+        "python",
+    ),
+    (
+        "docstring says brevity",
+        'def f(x):\n    """Names are short for brevity."""\n    return x * 2\n',
+        "python",
+    ),
+    (
+        "real python function",
+        'def add(a: int, b: int) -> int:\n    if not isinstance(a, int):\n        raise TypeError("a must be int")\n    return a + b\n',
+        "python",
+    ),
+    (
+        "real js handler",
+        "function handler(req, res) {\n  const id = req.params.id;\n  res.json({ id });\n}\n",
+        "javascript",
+    ),
 ]
 
 
@@ -125,8 +150,10 @@ def main():
         scores[label] = (correct, misses)
 
     width = max(len(label) for label, _ in CONFIGURATIONS)
-    print(f"Adversarial corpus: {len(VIOLATIONS)} violations, "
-          f"{len(LEGITIMATE)} legitimate samples, {total} total\n")
+    print(
+        f"Adversarial corpus: {len(VIOLATIONS)} violations, "
+        f"{len(LEGITIMATE)} legitimate samples, {total} total\n"
+    )
     for label, _ in CONFIGURATIONS:
         correct, misses = scores[label]
         print(f"  {label:<{width}}  {correct:>2}/{total}  ({100 * correct // total}%)")
@@ -136,8 +163,10 @@ def main():
     union_correct = scores["union (shipped)"][0]
     print()
     if union_correct < UNION_BASELINE:
-        print(f"REGRESSION: union scored {union_correct}/{total}, "
-              f"below the recorded baseline of {UNION_BASELINE}.")
+        print(
+            f"REGRESSION: union scored {union_correct}/{total}, "
+            f"below the recorded baseline of {UNION_BASELINE}."
+        )
         return 1
     print(f"Union at or above baseline ({union_correct}/{total} >= {UNION_BASELINE}).")
     return 0

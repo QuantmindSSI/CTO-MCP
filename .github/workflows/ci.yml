@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same ref makes the in-flight run irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff at the pinned version
+        run: pip install --disable-pip-version-check "ruff==0.16.2"
+      - run: ruff check .
+      - run: ruff format --check .
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every failing interpreter, not just the first.
+      fail-fast: false
+      matrix:
+        # The floor and the ceiling of the range declared in requires-python.
+        # 3.9 is here to keep that claim honest rather than aspirational.
+        python-version: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install the package and its dependencies
+        run: pip install --disable-pip-version-check .
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -v
+      - name: Scanner accuracy benchmark
+        # Exits non-zero if the union detection rate regresses below its baseline.
+        run: python tools/benchmark_scanner.py
+
+  packaging:
+    # Guards the defect where the wheel shipped without CONSTITUTION.md and the
+    # installed console script could not start. Import-only tests miss this,
+    # because in a checkout the data is found via the source tree.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          pip install --disable-pip-version-check build
+          python -m build --wheel
+
+      - name: Assert the data files are inside the wheel
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          required = [
+              "persona_constitution/data/CONSTITUTION.md",
+              "persona_constitution/data/DIRECTIVES.md",
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              sys.exit(f"wheel {wheel} is missing {missing}\ncontents: {names}")
+          print(f"OK: {wheel} carries both data files")
+          PY
+
+      - name: Install the wheel into a clean venv and run the server from elsewhere
+        run: |
+          python -m venv /tmp/cleanvenv
+          /tmp/cleanvenv/bin/pip install --disable-pip-version-check dist/*.whl
+          # cd away from the checkout so the server cannot fall back to source data.
+          cd /tmp
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_power_of_10","arguments":{"rule":4}}}' \
+            | /tmp/cleanvenv/bin/persona-constitution-mcp > /tmp/out.jsonl 2>/tmp/err.txt || true
+          cat /tmp/err.txt
+          /tmp/cleanvenv/bin/python - <<'PY'
+          import json, sys
+          for line in open("/tmp/out.jsonl"):
+              line = line.strip()
+              if not line:
+                  continue
+              msg = json.loads(line)
+              if msg.get("id") == 2:
+                  text = msg["result"]["content"][0]["text"]
+                  assert "Rule 4" in text, text[:200]
+                  print("OK: installed console script served:", text.splitlines()[0])
+                  sys.exit(0)
+          sys.exit("installed server produced no response for id=2")
+          PY

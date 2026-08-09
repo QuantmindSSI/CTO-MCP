@@ -29,6 +29,11 @@ classifiers = [
   "Topic :: Software Development :: Quality Assurance",
 ]
 
+[project.optional-dependencies]
+# Pinned exactly: an unpinned linter turns an upstream release into a red build
+# on a commit that changed nothing. Bump deliberately.
+dev = ["ruff==0.16.2"]
+
 [project.urls]
 Repository = "https://github.com/QuantumindSSI/CTO-MCP"
 
@@ -43,3 +48,37 @@ packages = ["persona_constitution"]
 # serve, and the server refuses to start without it. It must ship inside the
 # wheel. Verified by installing into a clean venv and calling the console script.
 persona_constitution = ["data/*.md"]
+
+[tool.ruff]
+# 3.9 is the floor declared in requires-python; lint against it so syntax that
+# only parses on newer interpreters is caught here rather than at a user's install.
+target-version = "py39"
+line-length = 110
+extend-exclude = ["build", "dist", ".venv"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "F",    # pyflakes: undefined names, unused imports
+  "W",    # pycodestyle warnings
+  "I",    # import sorting
+  "B",    # bugbear: mutable defaults, silent except, loop-variable binding
+  "BLE",  # blind except - the dispatcher's are deliberate and marked with noqa
+  "UP",   # pyupgrade
+  "C4",   # comprehension clarity
+  "SIM",  # simplification
+  "RET",  # return-path consistency
+  "ARG",  # unused arguments
+  "PTH",  # prefer pathlib
+  "RUF",
+]
+ignore = [
+  "E501",    # line length is enforced by the formatter, not the linter
+  "SIM105",  # contextlib.suppress is not clearer than try/except/pass here
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests deliberately construct throwaway values and long literal fixtures.
+"tests/*" = ["ARG002", "B011"]
+# The benchmark corpus is intentionally full of stub code as test data.
+"tools/benchmark_scanner.py" = ["ARG001", "ARG002"]

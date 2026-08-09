@@ -28,7 +28,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from persona_constitution import server  # noqa: E402 - path must be set before import.
 
-STUB_CODE = '''def process(data):
+STUB_CODE = """def process(data):
     # TODO: implement this later
     pass
 
@@ -49,7 +49,7 @@ except Exception:
 # The rest of the implementation follows the same pattern.
 # This is a starting point you can build on.
 # Error handling omitted for brevity.
-'''
+"""
 
 CLEAN_CODE = '''def add(a: int, b: int) -> int:
     """Return the sum of two integers.
@@ -112,9 +112,8 @@ class TestConstitutionLoading(unittest.TestCase):
         self.assertIn("THE SUPREME LAW", text)
 
     def test_missing_file_raises_file_not_found(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaises(FileNotFoundError):
-                server.load_constitution(Path(tmp) / "absent.md")
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(FileNotFoundError):
+            server.load_constitution(Path(tmp) / "absent.md")
 
     def test_empty_file_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -277,17 +276,14 @@ class TestScannerFalsePositiveSuppression(unittest.TestCase):
     def assertNotFail(self, code, language=None):
         result = server.scan_code(code, language=language)
         self.assertNotEqual(
-            result["verdict"], "FAIL",
+            result["verdict"],
+            "FAIL",
             f"false positive: {[f['finding'] for f in result['findings']]}",
         )
 
     def test_marker_inside_string_literal_is_not_a_violation(self):
         self.assertNotFail(
-            'def check(line):\n'
-            '    if "TODO" in line:\n'
-            '        report(line)\n'
-            '        return 1\n'
-            '    return 0\n'
+            'def check(line):\n    if "TODO" in line:\n        report(line)\n        return 1\n    return 0\n'
         )
 
     def test_protocol_method_ellipsis_is_not_a_stub(self):
@@ -299,12 +295,7 @@ class TestScannerFalsePositiveSuppression(unittest.TestCase):
         )
 
     def test_abstractmethod_ellipsis_is_not_a_stub(self):
-        self.assertNotFail(
-            "import abc\n"
-            "class B(abc.ABC):\n"
-            "    @abc.abstractmethod\n"
-            "    def run(self): ...\n"
-        )
+        self.assertNotFail("import abc\nclass B(abc.ABC):\n    @abc.abstractmethod\n    def run(self): ...\n")
 
     def test_documented_typed_except_pass_is_accepted(self):
         self.assertNotFail(
@@ -322,16 +313,12 @@ class TestScannerFalsePositiveSuppression(unittest.TestCase):
         )
 
     def test_brevity_in_prose_without_omission_is_not_a_violation(self):
-        self.assertNotFail(
-            'def f(x):\n'
-            '    """Names are short for brevity."""\n'
-            '    return x * 2\n'
-        )
+        self.assertNotFail('def f(x):\n    """Names are short for brevity."""\n    return x * 2\n')
 
     def test_real_implementation_passes(self):
         result = server.scan_code(
             "def add(a: int, b: int) -> int:\n"
-            '    if not isinstance(a, int):\n'
+            "    if not isinstance(a, int):\n"
             '        raise TypeError("a must be int")\n'
             "    return a + b\n"
         )
@@ -344,7 +331,8 @@ class TestScannerCrossLanguageDetection(unittest.TestCase):
     def assertFails(self, code, language):
         result = server.scan_code(code, language=language)
         self.assertEqual(
-            result["verdict"], "FAIL",
+            result["verdict"],
+            "FAIL",
             f"missed violation in {language}: {result['findings']}",
         )
 
@@ -352,32 +340,23 @@ class TestScannerCrossLanguageDetection(unittest.TestCase):
         self.assertFails("package main\nfunc Process(d []byte) error {\n}\n", "go")
 
     def test_go_panic_not_implemented(self):
-        self.assertFails(
-            'func Save(u User) error {\n    panic("not implemented")\n}\n', "go"
-        )
+        self.assertFails('func Save(u User) error {\n    panic("not implemented")\n}\n', "go")
 
     def test_javascript_empty_function_body(self):
         self.assertFails("function handler(req, res) {\n}\n", "javascript")
 
     def test_java_empty_method_body(self):
-        self.assertFails(
-            "public class S {\n    public void save(User u) {\n    }\n}\n", "java"
-        )
+        self.assertFails("public class S {\n    public void save(User u) {\n    }\n}\n", "java")
 
     def test_typescript_unimplemented_throw(self):
-        self.assertFails(
-            'function f(): never { throw new Error("unimplemented"); }\n', "typescript"
-        )
+        self.assertFails('function f(): never { throw new Error("unimplemented"); }\n', "typescript")
 
     def test_catch_containing_only_a_comment(self):
         self.assertFails("try { work(); } catch (e) { /* ignore */ }\n", "javascript")
 
     def test_real_javascript_handler_passes(self):
         result = server.scan_code(
-            "function handler(req, res) {\n"
-            "  const id = req.params.id;\n"
-            "  res.json({ id });\n"
-            "}\n",
+            "function handler(req, res) {\n  const id = req.params.id;\n  res.json({ id });\n}\n",
             language="javascript",
         )
         self.assertEqual(result["verdict"], "PASS")
@@ -434,8 +413,7 @@ class TestScannerContract(unittest.TestCase):
         result = server.scan_code("def f():\n    pass\n")
         self.assertTrue(result["findings"])
         for finding in result["findings"]:
-            self.assertIn(finding["source"],
-                          {"codebase-csi", "constitution-prose", "constitution-ast"})
+            self.assertIn(finding["source"], {"codebase-csi", "constitution-prose", "constitution-ast"})
 
     def test_unparseable_python_still_scans(self):
         # A syntax error must not silently yield a clean verdict.
@@ -459,8 +437,12 @@ class TestDispatch(unittest.TestCase):
 
     def call(self, name, arguments):
         response = server.dispatch(
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-             "params": {"name": name, "arguments": arguments}},
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            },
             self.text,
         )
         return response["result"]
@@ -520,7 +502,9 @@ class TestDispatch(unittest.TestCase):
             self.assertIn(gate, text)
 
     def test_scan_tool_returns_parseable_json(self):
-        payload = json.loads(tool_text({"result": self.call("scan_code_for_violations", {"code": STUB_CODE})}))
+        payload = json.loads(
+            tool_text({"result": self.call("scan_code_for_violations", {"code": STUB_CODE})})
+        )
         self.assertEqual(payload["verdict"], "FAIL")
         self.assertIn("summary", payload)
 
@@ -540,7 +524,9 @@ class TestDispatch(unittest.TestCase):
         self.assertEqual(response["error"]["code"], server.INVALID_PARAMS)
 
     def test_notifications_receive_no_response(self):
-        self.assertIsNone(server.dispatch({"jsonrpc": "2.0", "method": "notifications/initialized"}, self.text))
+        self.assertIsNone(
+            server.dispatch({"jsonrpc": "2.0", "method": "notifications/initialized"}, self.text)
+        )
 
     def test_unknown_method_returns_method_not_found(self):
         response = server.dispatch({"jsonrpc": "2.0", "id": 9, "method": "does/not/exist"}, self.text)
@@ -574,11 +560,20 @@ class TestToolSchemas(unittest.TestCase):
 
 class TestStdioTransport(unittest.TestCase):
     def test_initialize_handshake(self):
-        responses, _, code = run_server([
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
-             "params": {"protocolVersion": "2025-06-18", "capabilities": {},
-                        "clientInfo": {"name": "test", "version": "1"}}},
-        ])
+        responses, _, code = run_server(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {"name": "test", "version": "1"},
+                    },
+                },
+            ]
+        )
         self.assertEqual(code, 0)
         result = responses[0]["result"]
         self.assertEqual(result["protocolVersion"], "2025-06-18")
@@ -592,18 +587,22 @@ class TestStdioTransport(unittest.TestCase):
         self.assertEqual(names, set(server.TOOLS))
 
     def test_notification_produces_no_frame(self):
-        responses, _, _ = run_server([
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
-        ])
+        responses, _, _ = run_server(
+            [
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            ]
+        )
         self.assertEqual(len(responses), 1)
         self.assertEqual(responses[0]["id"], 1)
 
     def test_malformed_line_returns_parse_error_and_stream_survives(self):
-        responses, _, code = run_server([
-            "this is not json",
-            {"jsonrpc": "2.0", "id": 5, "method": "ping"},
-        ])
+        responses, _, code = run_server(
+            [
+                "this is not json",
+                {"jsonrpc": "2.0", "id": 5, "method": "ping"},
+            ]
+        )
         self.assertEqual(code, 0)
         by_id = index_by_id(responses)
         self.assertEqual(by_id[None]["error"]["code"], server.PARSE_ERROR)
@@ -614,21 +613,48 @@ class TestStdioTransport(unittest.TestCase):
         self.assertEqual(len(responses), 1)
 
     def test_full_session_end_to_end(self):
-        responses, stderr, code = run_server([
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-            {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-             "params": {"name": "get_constitution", "arguments": {"section": "invariants"}}},
-            {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-             "params": {"name": "get_knowledge_area", "arguments": {"ka": 2}}},
-            {"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-             "params": {"name": "get_power_of_10", "arguments": {"rule": 10}}},
-            {"jsonrpc": "2.0", "id": 6, "method": "tools/call",
-             "params": {"name": "get_verification_gates", "arguments": {}}},
-            {"jsonrpc": "2.0", "id": 7, "method": "tools/call",
-             "params": {"name": "scan_code_for_violations", "arguments": {"code": CLEAN_CODE}}},
-        ])
+        responses, stderr, code = run_server(
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18"},
+                },
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "get_constitution", "arguments": {"section": "invariants"}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "tools/call",
+                    "params": {"name": "get_knowledge_area", "arguments": {"ka": 2}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "tools/call",
+                    "params": {"name": "get_power_of_10", "arguments": {"rule": 10}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 6,
+                    "method": "tools/call",
+                    "params": {"name": "get_verification_gates", "arguments": {}},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {"name": "scan_code_for_violations", "arguments": {"code": CLEAN_CODE}},
+                },
+            ]
+        )
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
         by_id = index_by_id(responses)
@@ -651,7 +677,9 @@ class TestStdioTransport(unittest.TestCase):
         completed = subprocess.run(
             [sys.executable, str(SERVER_PATH)],
             input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n",
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         for line in completed.stdout.splitlines():
             if line.strip():

@@ -5,15 +5,15 @@ Zero-Framework-Tolerance code scanner (CodebaseCSI-backed), and the JSON-RPC dis
 can be imported and tested directly, independent of the stdio transport.
 """
 
-from .scanner import (  # noqa: F401 - re-exported as the package's public API.
+from .scanner import (
     PROSE_RULES,
     scan_code,
 )
-from .server import (  # noqa: F401 - re-exported as the package's public API.
+from .server import (
+    DEPRECATED_SECTION_ALIASES,
     KA_TITLES,
     PROTOCOL_VERSION,
     SECTION_MAP,
-    DEPRECATED_SECTION_ALIASES,
     SERVER_INFO,
     TOOLS,
     VERIFICATION_GATES,
@@ -29,11 +29,11 @@ from .server import (  # noqa: F401 - re-exported as the package's public API.
 __version__ = "3.0.0"
 
 __all__ = [
+    "DEPRECATED_SECTION_ALIASES",
     "KA_TITLES",
     "PROSE_RULES",
     "PROTOCOL_VERSION",
     "SECTION_MAP",
-    "DEPRECATED_SECTION_ALIASES",
     "SERVER_INFO",
     "TOOLS",
     "VERIFICATION_GATES",
