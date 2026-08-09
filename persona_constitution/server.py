@@ -5,7 +5,10 @@ Serves the Oluwaferanmi Oluwagbamila Agentic Engineering Persona
 (LLM Operational Constitution v3.0.0) over the Model Context Protocol
 stdio transport (newline-delimited JSON-RPC 2.0).
 
-Dependencies: Python 3.9+ standard library only. No third-party packages.
+Dependencies: Python 3.9+ standard library (tested on CPython 3.9.6 and
+3.14.6), plus `codebase-csi` for the scanner backend. Install into the
+project's virtualenv:
+    .venv/bin/pip install -e .
 
 Tools exposed:
   get_constitution         Full constitution or a named section.
@@ -14,6 +17,7 @@ Tools exposed:
   get_verification_gates   The G1-G5 pre-emission verification gates.
   scan_code_for_violations Static scan of code for Zero-Framework-Tolerance
                            violations (placeholders, stubs, deferral phrases).
+                           Backed by CodebaseCSI plus Constitution prose rules.
 
 Transport contract: one JSON-RPC message per line on stdin/stdout.
 Diagnostics go to stderr only; stdout carries protocol frames exclusively.
@@ -28,6 +32,29 @@ import os
 import re
 import sys
 from pathlib import Path
+
+# The scanner backend lives in a sibling module and depends on `codebase-csi`.
+# server.py is launched both as a script (by opencode) and imported as part of
+# the package (by the tests), so both import forms must resolve. A missing
+# dependency is fatal and reported loudly: a silently degraded scanner would
+# report clean results for code it never actually inspected.
+try:
+    from .scanner import PROSE_RULES, scan_code
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    try:
+        from persona_constitution.scanner import PROSE_RULES, scan_code
+    except ImportError as _scanner_error:
+        sys.stderr.write(
+            "persona-constitution: FATAL - cannot load the scanner backend: "
+            f"{_scanner_error}\n"
+            "The `codebase-csi` package is required. Install it with:\n"
+            "  .venv/bin/pip install 'codebase-csi @ "
+            "git+https://github.com/Thundastormgod/CodebaseCSI.git@main'\n"
+            "and ensure opencode launches this server with that virtualenv's "
+            "python.\n"
+        )
+        raise SystemExit(1)
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_INFO = {"name": "persona-constitution", "version": "3.0.0"}
@@ -171,108 +198,16 @@ def find_subsection(text, pattern):
 # --------------------------------------------------------------------------
 # Violation scanner
 # --------------------------------------------------------------------------
-
-# Each rule: (compiled regex, failure class, human-readable description, severity)
-# Severity: "violation" = definite failure, "warning" = requires human judgement.
-SCAN_RULES = [
-    (re.compile(r"\bTODO\b", re.IGNORECASE), "Class 1 - Framework Generation",
-     "TODO marker: work deferred instead of done", "violation"),
-    (re.compile(r"\bFIXME\b", re.IGNORECASE), "Class 1 - Framework Generation",
-     "FIXME marker: known defect shipped instead of fixed", "violation"),
-    (re.compile(r"\bXXX\b"), "Class 1 - Framework Generation",
-     "XXX marker: unresolved issue left in code", "warning"),
-    (re.compile(r"(?://|#|/\*|<!--)\s*(?:implement|add|insert|write)\b.{0,40}\b(?:logic|code|here|this|later)\b", re.IGNORECASE),
-     "Class 1 - Framework Generation",
-     "Comment describing unwritten implementation ('implement ... here/later')", "violation"),
-    (re.compile(r"your\s+code\s+(?:goes\s+)?here", re.IGNORECASE), "Class 1 - Framework Generation",
-     "'your code here' placeholder", "violation"),
-    (re.compile(r"\bplaceholder\b", re.IGNORECASE), "Class 1 - Framework Generation",
-     "Explicit placeholder reference", "warning"),
-    (re.compile(r"raise\s+NotImplementedError\b"), "Class 1 - Framework Generation",
-     "Python NotImplementedError stub", "violation"),
-    (re.compile(r"\b(?:unimplemented!|todo!)\s*\("), "Class 1 - Framework Generation",
-     "Rust unimplemented!()/todo!() macro stub", "violation"),
-    (re.compile(r"throw\s+new\s+(?:Error|UnsupportedOperationException)\s*\(\s*['\"](?:not\s+implemented|TODO)", re.IGNORECASE),
-     "Class 1 - Framework Generation",
-     "'not implemented' exception stub", "violation"),
-    (re.compile(r"(?m)^(\s*)(?:async\s+)?def\s+\w+\s*\([^)]*\)[^:\n]*:\s*(?:\n\1\s+(?:\"\"\"[\s\S]*?\"\"\"|'''[\s\S]*?''')\s*)?\n\1\s+(?:pass|\.\.\.)\s*$"),
-     "Class 1 - Framework Generation",
-     "Python function whose entire body is pass/... (stub)", "violation"),
-    (re.compile(r"catch\s*(?:\([^)]*\))?\s*\{\s*\}"), "Class 3 - Confidence Mismatch",
-     "Empty catch block: silently swallowed exception", "violation"),
-    (re.compile(r"except\s*(?:\([^)]*\)|[\w.,\s()]*)?:\s*\n\s*pass\b"), "Class 3 - Confidence Mismatch",
-     "except:pass - silently swallowed exception", "violation"),
-    (re.compile(r"rest\s+of\s+the\s+(?:implementation|code|file)", re.IGNORECASE), "Class 2 - Scaffold Deception",
-     "'rest of the implementation ...' - code omitted", "violation"),
-    (re.compile(r"follows?\s+the\s+same\s+pattern", re.IGNORECASE), "Class 2 - Scaffold Deception",
-     "'follows the same pattern' - code omitted by analogy", "violation"),
-    (re.compile(r"omitted\s+for\s+brevity|for\s+brevity", re.IGNORECASE), "Class 2 - Scaffold Deception",
-     "Content omitted 'for brevity'", "violation"),
-    (re.compile(r"and\s+so\s+on\s+for\s+the\s+rest", re.IGNORECASE), "Class 2 - Scaffold Deception",
-     "'and so on for the rest' - enumeration left unwritten", "violation"),
-    (re.compile(r"left\s+as\s+an\s+exercise", re.IGNORECASE), "Class 5 - Iteration Deferral",
-     "'left as an exercise' - work pushed to the reader", "violation"),
-    (re.compile(r"you\s+can\s+extend\s+this", re.IGNORECASE), "Class 5 - Iteration Deferral",
-     "'you can extend this' - verbal handoff instead of implementation", "violation"),
-    (re.compile(r"(?:this\s+is\s+a|as\s+a)\s+starting\s+point", re.IGNORECASE), "Class 5 - Iteration Deferral",
-     "'starting point' framing - partial solution offered as complete", "violation"),
-    (re.compile(r"you\s+(?:would|will|may|might)\s+want\s+to\s+add", re.IGNORECASE), "Class 5 - Iteration Deferral",
-     "'you would want to add ...' - known gap left open", "violation"),
-    (re.compile(r"(?:full|complete)\s+implementation\s+would", re.IGNORECASE), "Class 5 - Iteration Deferral",
-     "'the full implementation would ...' - admission of incompleteness", "violation"),
-]
+#
+# The detection engine lives in scanner.py: a union of CodebaseCSI's
+# MockCodeDetector (structural stub/mock detection) and the Constitution's
+# own prose rules for Class 2 / Class 5 narrative deferral, which CSI does
+# not model. `scan_code` and `PROSE_RULES` are imported at module load.
+#
+# Measured on an adversarial 26-case corpus: CodebaseCSI alone 50%,
+# the prior regex-only scanner 17%, the union 96%.
 
 MAX_SCAN_BYTES = 2_000_000
-
-
-def scan_code(code):
-    """Scan code for Zero-Framework-Tolerance violations.
-
-    Returns a dict with verdict PASS/REVIEW/FAIL and a list of findings, each
-    carrying line number, failure class, description, severity, and the
-    offending line (truncated to 200 chars). Complexity: O(rules x len(code)).
-    """
-    assert isinstance(code, str), "code must be a string"
-    findings = []
-    for regex, failure_class, description, severity in SCAN_RULES:
-        for match in regex.finditer(code):
-            line_no = code.count("\n", 0, match.start()) + 1
-            line_start = code.rfind("\n", 0, match.start()) + 1
-            line_end = code.find("\n", match.start())
-            if line_end == -1:
-                line_end = len(code)
-            findings.append({
-                "line": line_no,
-                "class": failure_class,
-                "finding": description,
-                "severity": severity,
-                "text": code[line_start:line_end].strip()[:200],
-            })
-    findings.sort(key=lambda f: (f["line"], f["class"]))
-    violation_count = sum(1 for f in findings if f["severity"] == "violation")
-    warning_count = len(findings) - violation_count
-    if violation_count > 0:
-        verdict = "FAIL"
-        summary = (
-            f"{violation_count} violation(s) and {warning_count} warning(s) found. "
-            "Per the Anti-Deception Enforcement Protocol this output is a failed output: "
-            "discard it and regenerate the complete implementation from the problem "
-            "statement. Do not patch the framework."
-        )
-    elif warning_count > 0:
-        verdict = "REVIEW"
-        summary = (
-            f"No definite violations, but {warning_count} warning(s) require judgement. "
-            "Confirm each flagged line is genuinely complete, then run gates G1-G5."
-        )
-    else:
-        verdict = "PASS"
-        summary = (
-            "No placeholder, stub, scaffold, or deferral markers detected. This scan is "
-            "necessary but not sufficient: it cannot prove executability, correctness, "
-            "or dependency honesty. Run gates G1-G5 before delivering."
-        )
-    return {"verdict": verdict, "summary": summary, "findings": findings}
 
 
 # --------------------------------------------------------------------------
@@ -384,7 +319,10 @@ def tool_scan_code_for_violations(constitution, args):
         raise ValueError(
             f"Argument 'code' exceeds the {MAX_SCAN_BYTES // 1_000_000}MB scan limit; scan files individually."
         )
-    result = scan_code(code)
+    language = args.get("language")
+    if language is not None and not isinstance(language, str):
+        raise ValueError("Argument 'language' must be a string when supplied.")
+    result = scan_code(code, language=language)
     return json.dumps(result, indent=2)
 
 
@@ -460,17 +398,28 @@ TOOLS = {
         "handler": tool_scan_code_for_violations,
         "description": (
             "Statically scan code for Zero-Framework-Tolerance violations: TODO/FIXME markers, "
-            "stub bodies (pass/.../NotImplementedError/todo!()), empty catch blocks, scaffold "
-            "deception phrases ('rest of the implementation', 'omitted for brevity'), and "
-            "iteration-deferral phrases ('left as an exercise', 'you can extend this'). Returns "
-            "a JSON verdict (PASS/REVIEW/FAIL) with line-numbered findings. Use before delivering "
-            "generated code. A PASS is necessary but not sufficient - still run gates G1-G5."
+            "stub bodies (pass/.../NotImplementedError/todo!()/panic()), empty function and catch "
+            "bodies across Python, JavaScript, TypeScript, Java, Go and Rust, scaffold deception "
+            "phrases ('rest of the implementation', 'omitted for brevity'), and iteration-deferral "
+            "phrases ('left as an exercise', 'you can extend this'). Backed by the CodebaseCSI "
+            "forensic detector plus Constitution prose rules; Python input additionally gets AST "
+            "analysis so abstract stubs (Protocol/ABC/@abstractmethod) and markers inside string "
+            "literals are not falsely flagged. Returns a JSON verdict (PASS/REVIEW/FAIL) with "
+            "line-numbered findings. Use before delivering generated code. A PASS is necessary "
+            "but not sufficient - still run gates G1-G5."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "code": {"type": "string", "description": "The complete code to scan."},
-                "language": {"type": "string", "description": "Optional language hint (informational only)."},
+                "language": {
+                    "type": "string",
+                    "description": (
+                        "Optional language hint, e.g. 'python', 'javascript', 'typescript', 'java', "
+                        "'go', 'rust'. Selects the string-masking strategy and enables Python AST "
+                        "analysis. Omit to infer automatically."
+                    ),
+                },
             },
             "required": ["code"],
             "additionalProperties": False,

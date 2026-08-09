@@ -200,7 +200,9 @@ class TestViolationScanner(unittest.TestCase):
     def test_line_numbers_are_accurate(self):
         code = "line one\nline two\n# TODO: fix\nline four\n"
         findings = server.scan_code(code)["findings"]
-        todo = [f for f in findings if "TODO" in f["finding"]]
+        # Matched case-insensitively: the finding text comes from the backing
+        # detector, which renders the marker in lowercase.
+        todo = [f for f in findings if "todo" in f["finding"].lower()]
         self.assertEqual(len(todo), 1)
         self.assertEqual(todo[0]["line"], 3)
         self.assertEqual(todo[0]["text"], "# TODO: fix")
@@ -231,6 +233,191 @@ class TestViolationScanner(unittest.TestCase):
     def test_docstring_only_stub_detected(self):
         code = 'def f(a):\n    """Docstring only."""\n    pass\n'
         self.assertEqual(server.scan_code(code)["verdict"], "FAIL")
+
+
+class TestScannerFalsePositiveSuppression(unittest.TestCase):
+    """Legitimate code that superficially resembles a violation must not FAIL.
+
+    Every case here was a confirmed false positive of the previous regex-only
+    scanner. They are regression tests for the AST-aware backend.
+    """
+
+    def assertNotFail(self, code, language=None):
+        result = server.scan_code(code, language=language)
+        self.assertNotEqual(
+            result["verdict"], "FAIL",
+            f"false positive: {[f['finding'] for f in result['findings']]}",
+        )
+
+    def test_marker_inside_string_literal_is_not_a_violation(self):
+        self.assertNotFail(
+            'def check(line):\n'
+            '    if "TODO" in line:\n'
+            '        report(line)\n'
+            '        return 1\n'
+            '    return 0\n'
+        )
+
+    def test_protocol_method_ellipsis_is_not_a_stub(self):
+        self.assertNotFail(
+            "from typing import Protocol\n"
+            "class Repo(Protocol):\n"
+            "    def get(self, k: str) -> bytes:\n"
+            "        ...\n"
+        )
+
+    def test_abstractmethod_ellipsis_is_not_a_stub(self):
+        self.assertNotFail(
+            "import abc\n"
+            "class B(abc.ABC):\n"
+            "    @abc.abstractmethod\n"
+            "    def run(self): ...\n"
+        )
+
+    def test_documented_typed_except_pass_is_accepted(self):
+        self.assertNotFail(
+            "def shut(sock):\n"
+            "    try:\n"
+            "        sock.close()\n"
+            "    except OSError:\n"
+            "        pass  # socket already closed by peer\n"
+        )
+
+    def test_react_placeholder_attribute_is_not_a_violation(self):
+        self.assertNotFail(
+            'export const F = () => <input placeholder="Enter email" />;\n',
+            language="javascript",
+        )
+
+    def test_brevity_in_prose_without_omission_is_not_a_violation(self):
+        self.assertNotFail(
+            'def f(x):\n'
+            '    """Names are short for brevity."""\n'
+            '    return x * 2\n'
+        )
+
+    def test_real_implementation_passes(self):
+        result = server.scan_code(
+            "def add(a: int, b: int) -> int:\n"
+            '    if not isinstance(a, int):\n'
+            '        raise TypeError("a must be int")\n'
+            "    return a + b\n"
+        )
+        self.assertEqual(result["verdict"], "PASS")
+
+
+class TestScannerCrossLanguageDetection(unittest.TestCase):
+    """Structural stubs must be caught outside Python, where CSI is weakest."""
+
+    def assertFails(self, code, language):
+        result = server.scan_code(code, language=language)
+        self.assertEqual(
+            result["verdict"], "FAIL",
+            f"missed violation in {language}: {result['findings']}",
+        )
+
+    def test_go_empty_function_body(self):
+        self.assertFails("package main\nfunc Process(d []byte) error {\n}\n", "go")
+
+    def test_go_panic_not_implemented(self):
+        self.assertFails(
+            'func Save(u User) error {\n    panic("not implemented")\n}\n', "go"
+        )
+
+    def test_javascript_empty_function_body(self):
+        self.assertFails("function handler(req, res) {\n}\n", "javascript")
+
+    def test_java_empty_method_body(self):
+        self.assertFails(
+            "public class S {\n    public void save(User u) {\n    }\n}\n", "java"
+        )
+
+    def test_typescript_unimplemented_throw(self):
+        self.assertFails(
+            'function f(): never { throw new Error("unimplemented"); }\n', "typescript"
+        )
+
+    def test_catch_containing_only_a_comment(self):
+        self.assertFails("try { work(); } catch (e) { /* ignore */ }\n", "javascript")
+
+    def test_real_javascript_handler_passes(self):
+        result = server.scan_code(
+            "function handler(req, res) {\n"
+            "  const id = req.params.id;\n"
+            "  res.json({ id });\n"
+            "}\n",
+            language="javascript",
+        )
+        self.assertEqual(result["verdict"], "PASS")
+
+
+class TestScannerProseRules(unittest.TestCase):
+    """Class 2 and Class 5 deferral phrases, which CodebaseCSI does not model."""
+
+    def assertFails(self, code):
+        result = server.scan_code(code, language="javascript")
+        self.assertEqual(result["verdict"], "FAIL", f"missed: {code!r}")
+
+    def test_scaffold_deception_phrases(self):
+        for phrase in (
+            "// rest of the implementation follows the same pattern",
+            "// remaining handlers omitted for brevity",
+            "// and so on for the rest of the endpoints",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertFails(phrase + "\n")
+
+    def test_iteration_deferral_phrases(self):
+        for phrase in (
+            "// Error handling is left as an exercise for the reader",
+            "// This is a starting point",
+            "// you can extend this to handle retries",
+            "// in production, you would add rate limiting",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertFails(phrase + "\n")
+
+
+class TestScannerContract(unittest.TestCase):
+    """The scanner's public result contract and engine composition."""
+
+    def test_result_reports_contributing_engines(self):
+        result = server.scan_code("def f():\n    return 1\n")
+        self.assertIn("engines", result)
+        self.assertIn("codebase-csi", result["engines"])
+        self.assertIn("constitution-prose", result["engines"])
+        self.assertIn("constitution-ast", result["engines"])
+
+    def test_non_python_source_skips_ast_engine(self):
+        result = server.scan_code("const a = 1;\n", language="javascript")
+        self.assertNotIn("constitution-ast", result["engines"])
+
+    def test_language_argument_is_honoured(self):
+        # Valid Python that would parse, explicitly declared as JavaScript,
+        # must not receive Python AST analysis.
+        result = server.scan_code("x = 1\n", language="javascript")
+        self.assertNotIn("constitution-ast", result["engines"])
+
+    def test_findings_carry_a_source_attribution(self):
+        result = server.scan_code("def f():\n    pass\n")
+        self.assertTrue(result["findings"])
+        for finding in result["findings"]:
+            self.assertIn(finding["source"],
+                          {"codebase-csi", "constitution-prose", "constitution-ast"})
+
+    def test_unparseable_python_still_scans(self):
+        # A syntax error must not silently yield a clean verdict.
+        result = server.scan_code("def broken(:\n    # TODO: fix\n")
+        self.assertEqual(result["verdict"], "FAIL")
+
+    def test_duplicate_findings_are_collapsed(self):
+        result = server.scan_code("def f():\n    pass\n")
+        keys = [(f["line"], f["class"], f["finding"]) for f in result["findings"]]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_scan_rejects_non_string_input(self):
+        with self.assertRaises(AssertionError):
+            server.scan_code(None)
 
 
 class TestDispatch(unittest.TestCase):

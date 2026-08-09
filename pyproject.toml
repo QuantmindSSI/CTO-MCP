@@ -7,14 +7,23 @@ name = "persona-constitution-mcp"
 version = "3.0.0"
 description = "MCP server serving the Agentic Engineering Persona constitution: SWEBOK v4.0, NASA Power of 10, Zero Framework Tolerance."
 readme = "README.md"
+# Verified by running the full test suite on CPython 3.9.6 and 3.14.6.
 requires-python = ">=3.9"
-dependencies = []
+
+# CodebaseCSI supplies the structural stub/mock detection behind
+# scan_code_for_violations. It is not published on PyPI, so it is pinned to a
+# git revision rather than a version range.
+dependencies = [
+  "codebase-csi @ git+https://github.com/Thundastormgod/CodebaseCSI.git@8aa23f7da15e567f23972a3da4731b53942490c7",
+]
 keywords = ["mcp", "model-context-protocol", "swebok", "power-of-10", "code-quality", "llm"]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 4 - Beta",
   "Environment :: Console",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Quality Assurance",
 ]
 

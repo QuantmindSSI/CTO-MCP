@@ -12,8 +12,10 @@ The constitution exists to counteract a specific, structural LLM failure mode: p
 
 ## Requirements
 
-- Python **3.9+**
-- **No third-party dependencies.** Standard library only.
+- Python **3.9+** — the test suite is run against CPython 3.9.6 and 3.14.6.
+- One dependency: [**CodebaseCSI**](https://github.com/Thundastormgod/CodebaseCSI) (MIT), which
+  backs the code scanner. It is itself dependency-free, so the full install tree is
+  CodebaseCSI and nothing else. It is not published on PyPI and is pinned to a git revision.
 
 ---
 
@@ -23,15 +25,31 @@ The constitution exists to counteract a specific, structural LLM failure mode: p
 CTO-MCP/
 ├── persona_constitution/
 │   ├── __init__.py          Package API re-exports
+│   ├── scanner.py           Detection engine: CodebaseCSI + prose rules + Python AST
 │   └── server.py            MCP server: JSON-RPC 2.0 over stdio
 ├── data/
 │   ├── CONSTITUTION.md      Full constitution (the served corpus)
 │   └── DIRECTIVES.md        Distilled directives for system-prompt injection
 ├── tests/
-│   └── test_server.py       51 tests: unit + end-to-end stdio transport
+│   └── test_server.py       74 tests: unit + end-to-end stdio transport
 ├── pyproject.toml
 └── README.md
 ```
+
+---
+
+## Setup
+
+The server needs a virtualenv with CodebaseCSI installed. From the repo root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .
+```
+
+`.venv/bin/python` is then the interpreter your MCP client must launch. Starting the
+server with an interpreter that lacks CodebaseCSI exits `1` with an explanatory message
+on stderr — it will not fall back to a weaker scanner and report misleadingly clean results.
 
 ---
 
@@ -50,12 +68,16 @@ Add to `~/.config/opencode/opencode.json` (or `opencode.jsonc`), replacing `<REP
   "mcp": {
     "persona-constitution": {
       "type": "local",
-      "command": ["python3", "<REPO>/persona_constitution/server.py"],
+      "command": ["<REPO>/.venv/bin/python", "<REPO>/persona_constitution/server.py"],
       "enabled": true
     }
   }
 }
 ```
+
+`instructions` is global opencode config, so the directives are injected into the system
+prompt of **every** model and provider you have configured — there is no per-model setup.
+Note that the directives consume context: models with small context windows may struggle.
 
 Restart opencode afterwards — config is loaded once at startup and is not hot-reloaded.
 
@@ -67,7 +89,7 @@ Any client that speaks MCP over stdio works. Claude Desktop (`claude_desktop_con
 {
   "mcpServers": {
     "persona-constitution": {
-      "command": "python3",
+      "command": "<REPO>/.venv/bin/python",
       "args": ["<REPO>/persona_constitution/server.py"]
     }
   }
@@ -92,16 +114,57 @@ Any client that speaks MCP over stdio works. Claude Desktop (`claude_desktop_con
 
 ### The scanner
 
-`scan_code_for_violations` applies 21 rules covering four of the five documented LLM failure classes:
+`scan_code_for_violations` is a union of three engines, because no one of them is adequate alone:
 
-- **Class 1 — Framework Generation:** `TODO`, `FIXME`, `XXX`, "your code here", "implement … here/later", `raise NotImplementedError`, `todo!()`, `unimplemented!()`, and Python functions whose entire body is `pass` or `...`
-- **Class 2 — Scaffold Deception:** "rest of the implementation", "follows the same pattern", "omitted for brevity", "and so on for the rest"
-- **Class 3 — Confidence Mismatch:** empty `catch {}` blocks, `except: pass`
-- **Class 5 — Iteration Deferral:** "left as an exercise", "you can extend this", "this is a starting point", "you would want to add", "the full implementation would"
+| Engine | Contributes |
+|---|---|
+| **CodebaseCSI** `MockCodeDetector` | Structural stubs, mock implementations, always-success functions, print-only bodies, fake data, pass-through functions, TODO markers |
+| **Constitution prose rules** | Class 2 / Class 5 narrative deferral, and empty-body / unimplemented-stub detection for JavaScript, TypeScript, Java, Go and Rust |
+| **Python AST analysis** | Suppresses markers inside ordinary string literals; distinguishes genuine stubs from legitimate abstract declarations; classifies bare vs. typed `except: pass` |
+
+Coverage by failure class:
+
+- **Class 1 — Framework Generation:** `TODO`, `FIXME`, `XXX`, "your code here", "implement … here/later", `raise NotImplementedError`, `todo!()`, `unimplemented!()`, `panic("not implemented")`, empty function and method bodies, and bodies consisting only of `pass` or `...`
+- **Class 2 — Scaffold Deception:** "rest of the implementation", "follows the same pattern", "omitted for brevity", "and so on for the rest", "similar for the others"
+- **Class 3 — Confidence Mismatch:** empty `catch {}` blocks, bare `except: pass`, always-success functions
+- **Class 5 — Iteration Deferral:** "left as an exercise", "you can extend this", "this is a starting point", "you would want to add", "the full implementation would", "in production you would"
 
 Verdicts: `FAIL` if any *violation* fires, `REVIEW` if only *warnings* fire, `PASS` otherwise.
 
-**A `PASS` is necessary but not sufficient.** Static pattern matching proves the absence of placeholder markers — it cannot prove executability, correctness, or dependency honesty. The G1–G5 gates still apply.
+#### Measured accuracy
+
+Measured against a 27-case adversarial corpus — 18 real violations across six languages, plus 9
+pieces of legitimate code specifically constructed to resemble violations (a linter that matches
+on the string `"TODO"`, a `typing.Protocol` whose methods are `...`, a documented
+`except OSError: pass`, a React `placeholder=` attribute, a docstring containing the words
+"for brevity"):
+
+| Configuration | Correct verdicts |
+|---|---|
+| Original regex-only scanner (pre-CSI, git history) | 12/27 — 44% |
+| CodebaseCSI alone | 13/27 — 48% |
+| Constitution prose + structural rules alone | 20/27 — 74% |
+| **Union (this implementation)** | **26/27 — 96%** |
+
+The two engines fail on largely disjoint inputs, which is why the union beats both: CodebaseCSI
+misses every non-Python structural stub and every prose deferral; the prose rules miss
+Python-semantic stubs such as always-true and print-only functions.
+
+The one remaining miss is a JavaScript body of `{ return null; }`, deliberately graded `REVIEW`
+rather than `FAIL` because a bare null return is legitimate in hand-written code. It is surfaced,
+not silently dropped.
+
+Reproduce with:
+
+```bash
+.venv/bin/python tools/benchmark_scanner.py
+```
+
+**Read these numbers with suspicion.** The corpus is small and was written by the same author as
+the rules, which biases the result upward. It is a regression guard, not a general accuracy claim.
+
+**A `PASS` is necessary but not sufficient.** Static analysis proves the absence of placeholder
+markers — it cannot prove executability, correctness, or dependency honesty. The G1–G5 gates still apply.
 
 ---
 
@@ -131,15 +194,17 @@ The server exits with status `1` and a message on **stderr** if the constitution
 
 ## Tests
 
+Run from the repo root, using the virtualenv interpreter:
+
 ```bash
-python3 -m unittest discover -s tests -v   # 51 tests
-python3 tests/test_server.py               # equivalent, direct
+.venv/bin/python -m unittest discover -s tests -v   # 74 tests
 ```
 
-Coverage spans two layers:
+Coverage spans three layers:
 
 1. **Unit** — constitution loading (missing, empty, env-override), markdown section extraction (all 14 sections, all 18 KAs, all 10 rules, fenced-code-block handling), the scanner (line-number accuracy, per-class detection, verdict boundaries), and JSON-RPC dispatch (tool errors vs. protocol errors, notifications, malformed params).
-2. **End-to-end transport** — a real subprocess driven over stdio: `initialize` handshake, `tools/list`, a full multi-tool session, malformed-input recovery, notification suppression, non-zero exit on a missing data file, and the invariant that **stdout carries only protocol frames**.
+2. **Scanner behaviour** — false-positive suppression (string literals, `Protocol`, `@abstractmethod`, documented `except: pass`), cross-language stub detection (Go, JavaScript, Java, TypeScript), prose deferral rules, engine composition, and graceful handling of unparseable source.
+3. **End-to-end transport** — a real subprocess driven over stdio: `initialize` handshake, `tools/list`, a full multi-tool session, malformed-input recovery, notification suppression, non-zero exit on a missing data file, and the invariant that **stdout carries only protocol frames**.
 
 ---
 
@@ -153,8 +218,18 @@ Coverage spans two layers:
 
 ---
 
+## Credits
+
+The structural detection half of `scan_code_for_violations` is provided by
+**[CodebaseCSI](https://github.com/Thundastormgod/CodebaseCSI)**, used under the MIT License.
+This project adds the MCP interface, the Constitution corpus, the Class 2 / Class 5 prose
+rules, the cross-language structural rules, and the Python AST false-positive suppression.
+
+---
+
 ## References
 
 1. IEEE Computer Society (2024). *Guide to the Software Engineering Body of Knowledge (SWEBOK) v4.0.* Ed. H. Washizaki. 18 Knowledge Areas.
 2. Holzmann, G.J. (2006). *The Power of 10: Rules for Developing Safety-Critical Code.* IEEE Computer 39(6), 95–97.
 3. Model Context Protocol specification — <https://modelcontextprotocol.io>
+4. CodebaseCSI — forensic AI-generated-code detection. <https://github.com/Thundastormgod/CodebaseCSI>
