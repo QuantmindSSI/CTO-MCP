@@ -39,10 +39,12 @@ dev = ["ruff==0.16.2"]
 # The pins are an ABI compatibility matrix, not a style choice. py-tree-sitter
 # 0.23.x (the newest series installable on the 3.9 floor) accepts grammar ABI
 # 13-14 and rejects 15 with "Incompatible Language version". Every pin below
-# was verified to load and parse on CPython 3.9.6: rust 0.24+ and c 0.23.5+
-# ship ABI 15 and are therefore excluded. php is deliberately absent - its
-# wheel exports language_php() rather than language(), which the vendored
-# loader treats as unavailable and routes to the regex fallback.
+# was verified to load and parse on CPython 3.9.6: rust 0.23.3+ and c 0.23.5+
+# ship ABI 15 mid-series and are excluded by exact ceilings (verified
+# empirically on a fresh resolve, not read from changelogs). php is
+# deliberately absent - its wheel exports language_php() rather than
+# language(), which the vendored loader treats as unavailable and routes to
+# the regex fallback.
 ast = [
   "tree-sitter>=0.23,<0.24",
   "tree-sitter-python>=0.23,<0.24",
@@ -50,7 +52,7 @@ ast = [
   "tree-sitter-typescript>=0.23,<0.24",
   "tree-sitter-java>=0.23,<0.24",
   "tree-sitter-go>=0.23,<0.24",
-  "tree-sitter-rust>=0.23,<0.24",
+  "tree-sitter-rust>=0.23,<0.23.3",
   "tree-sitter-ruby>=0.23,<0.24",
   "tree-sitter-c>=0.23,<0.23.5",
   "tree-sitter-cpp>=0.23,<0.24",
