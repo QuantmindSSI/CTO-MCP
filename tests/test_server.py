@@ -324,6 +324,98 @@ class TestScannerFalsePositiveSuppression(unittest.TestCase):
         )
         self.assertEqual(result["verdict"], "PASS")
 
+    def test_python_function_containing_empty_dict_literal_is_not_an_empty_body(self):
+        # The brace-language empty-body rule must never fire on a Python def
+        # whose body merely assigns a {} literal.
+        self.assertNotFail(
+            "def collect(items):\n    result = {}\n    result.update(items)\n    return result\n"
+        )
+
+    def test_trigger_word_between_two_clean_docstrings_is_not_a_docstring_todo(self):
+        # Triple-quote parity: a regex can match from one docstring's closing
+        # quotes to the next one's opening quotes. The AST verification must
+        # reject hits that are not inside a real trigger-carrying docstring.
+        self.assertNotFail(
+            "def first():\n"
+            '    """Format a disposition."""\n'
+            '    return "No placeholder markers detected."\n'
+            "\n"
+            "\n"
+            "def second():\n"
+            '    """Render the verdict."""\n'
+            '    return "done"\n'
+        )
+
+    def test_genuine_docstring_todo_is_still_flagged(self):
+        result = server.scan_code(
+            'def retry(op):\n    """TODO: implement backoff before release."""\n    return op()\n'
+        )
+        self.assertEqual(result["verdict"], "FAIL")
+
+
+class TestPythonDeepLogicRules(unittest.TestCase):
+    """Po10 metrics and logic-shape warnings: REVIEW, never FAIL, on judgement calls."""
+
+    def verdict_and_classes(self, code):
+        result = server.scan_code(code, language="python")
+        return result["verdict"], [f["class"] for f in result["findings"]]
+
+    def test_empty_loop_body_warns(self):
+        verdict, _ = self.verdict_and_classes(
+            "def poll(q):\n    while not q.ready():\n        pass\n    return q.get()\n"
+        )
+        self.assertEqual(verdict, "REVIEW")
+
+    def test_identical_branches_warn(self):
+        verdict, _ = self.verdict_and_classes(
+            "def f(x):\n    if x:\n        return compute()\n    else:\n        return compute()\n"
+        )
+        self.assertEqual(verdict, "REVIEW")
+
+    def test_elif_chain_is_not_identical_branches(self):
+        verdict, _ = self.verdict_and_classes(
+            "def f(x):\n"
+            "    if x == 1:\n"
+            "        return a()\n"
+            "    elif x == 2:\n"
+            "        return a()\n"
+            "    return b()\n"
+        )
+        self.assertEqual(verdict, "PASS")
+
+    def test_constant_if_condition_warns_but_while_true_does_not(self):
+        verdict, _ = self.verdict_and_classes("def f():\n    if True:\n        return 1\n    return 2\n")
+        self.assertEqual(verdict, "REVIEW")
+        verdict, _ = self.verdict_and_classes(
+            "def loop(q):\n"
+            "    while True:\n"
+            "        item = q.get()\n"
+            "        if item is None:\n"
+            "            break\n"
+            "        handle(item)\n"
+        )
+        self.assertEqual(verdict, "PASS")
+
+    def test_unreachable_code_warns(self):
+        verdict, _ = self.verdict_and_classes("def f():\n    return 1\n    cleanup()\n")
+        self.assertEqual(verdict, "REVIEW")
+
+    def test_complexity_and_length_limits_warn(self):
+        branches = "".join(f"    if x == {i}:\n        return {i}\n" for i in range(12))
+        verdict, classes = self.verdict_and_classes(f"def dispatch(x):\n{branches}    return -1\n")
+        self.assertEqual(verdict, "REVIEW")
+        self.assertIn("Power of 10 - Rule 1 (Simple Control Flow)", classes)
+        lines = "".join(f"    a{i} = {i}\n" for i in range(55))
+        verdict, classes = self.verdict_and_classes(f"def long_one():\n{lines}    return a0\n")
+        self.assertEqual(verdict, "REVIEW")
+        self.assertIn("Power of 10 - Rule 4 (Function Length)", classes)
+
+    def test_small_real_function_still_passes(self):
+        verdict, _ = self.verdict_and_classes(
+            "def add(a, b):\n    if not isinstance(a, int):\n        raise TypeError('a')\n    return a + b\n"
+        )
+        self.assertEqual(verdict, "PASS")
+
 
 class TestScannerCrossLanguageDetection(unittest.TestCase):
     """Structural stubs must be caught outside Python, where CSI is weakest."""

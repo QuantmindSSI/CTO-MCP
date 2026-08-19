@@ -16,8 +16,10 @@ Tools exposed:
   get_power_of_10          A specific NASA Power of 10 rule, or all ten.
   get_verification_gates   The G1-G5 pre-emission verification gates.
   scan_code_for_violations Static scan of code for Zero-Framework-Tolerance
-                           violations (placeholders, stubs, deferral phrases).
-                           Backed by CodebaseCSI plus Constitution prose rules.
+                           violations (scaffold markers, stubs, deferral
+                           phrases). CodebaseCSI plus Constitution prose rules.
+  review_patch             Diff-aware review of staged or PR changes with
+                           changed-line attribution and the C-03 test policy.
 
 Transport contract: one JSON-RPC message per line on stdin/stdout.
 Diagnostics go to stderr only; stdout carries protocol frames exclusively.
@@ -42,25 +44,27 @@ from pathlib import Path
 # dependency is fatal and reported loudly: a silently degraded scanner would
 # report clean results for code it never actually inspected.
 try:
+    from .review.engine import review_patch
     from .scanner import scan_code
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
+        from persona_constitution.review.engine import review_patch
         from persona_constitution.scanner import scan_code
     except ImportError as _scanner_error:
         sys.stderr.write(
             "persona-constitution: FATAL - cannot load the scanner backend: "
             f"{_scanner_error}\n"
-            "The `codebase-csi` package is required. Install it with:\n"
-            "  .venv/bin/pip install 'codebase-csi @ "
-            "git+https://github.com/Thundastormgod/CodebaseCSI.git@main'\n"
+            "The vendored `codebase_csi` package must be importable. Install "
+            "this project into its virtualenv:\n"
+            "  .venv/bin/pip install -e .\n"
             "and ensure opencode launches this server with that virtualenv's "
             "python.\n"
         )
         raise SystemExit(1) from _scanner_error
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "persona-constitution", "version": "3.0.0"}
+SERVER_INFO = {"name": "persona-constitution", "version": "3.2.0"}
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
@@ -230,15 +234,17 @@ def find_subsection(text, pattern):
 # --------------------------------------------------------------------------
 #
 # The detection engine lives in scanner.py: a union of CodebaseCSI's
-# MockCodeDetector (structural stub/mock detection) and the Constitution's
-# own prose rules for Class 2 / Class 5 narrative deferral, which CSI does
-# not model. `scan_code` is imported at module load; the rules themselves
-# live in scanner.py and are re-exported from the package __init__.
+# structural detector of incomplete implementations, the Constitution's own
+# prose rules for Class 2 / Class 5 narrative deferral, Python stdlib-AST
+# analysis, and - when the optional `ast` extra is installed - the
+# constitution-xast tree-sitter engine for brace languages (ast_bridge.py).
 #
-# Measured on the adversarial 27-case corpus in tools/benchmark_scanner.py:
-# CodebaseCSI alone 13/27 (48%), prose rules alone 20/27 (74%), the union
-# 26/27 (96%). Reproduce with `python tools/benchmark_scanner.py`; do not
-# edit these numbers without rerunning it.
+# Measured on the adversarial 33-case corpus in tools/benchmark_scanner.py:
+# CodebaseCSI alone 15/33 (45%), prose rules alone 22/33 (66%), the union
+# 33/33 with the `ast` extra and 28/33 without it (the delta is the five
+# corpus cases only real AST parsing can decide). Reproduce with
+# `python tools/benchmark_scanner.py`; do not edit these numbers without
+# rerunning it.
 
 MAX_SCAN_BYTES = 2_000_000
 
@@ -298,27 +304,30 @@ KA_TITLES = {
 }
 
 
+def _resolve_ka_number(ka):
+    """Map a ka argument (number, digit string, or name substring) to 1-18."""
+    if isinstance(ka, (int, float)) and int(ka) == ka:
+        return int(ka)
+    if not isinstance(ka, str):
+        return None
+    digits = re.search(r"\d+", ka)
+    if digits:
+        return int(digits.group())
+    needle = ka.strip().lower()
+    matches = [n for n, t in KA_TITLES.items() if needle in t.lower()]
+    if len(matches) > 1:
+        options = ", ".join(f"KA-{n:02d} {KA_TITLES[n]}" for n in matches)
+        raise ValueError(f"Ambiguous KA name '{ka}'. Matches: {options}")
+    return matches[0] if matches else None
+
+
 def tool_get_knowledge_area(constitution, args):
     """Return one SWEBOK v4.0 Knowledge Area by number (1-18) or name."""
     ka = args.get("ka")
     if ka is None:
         listing = "\n".join(f"KA-{n:02d} - {t}" for n, t in KA_TITLES.items())
         return "SWEBOK v4.0 defines 18 Knowledge Areas. Pass `ka` as a number (1-18) or a name:\n" + listing
-    number = None
-    if isinstance(ka, (int, float)) and int(ka) == ka:
-        number = int(ka)
-    elif isinstance(ka, str):
-        digits = re.search(r"\d+", ka)
-        if digits:
-            number = int(digits.group())
-        else:
-            needle = ka.strip().lower()
-            matches = [n for n, t in KA_TITLES.items() if needle in t.lower()]
-            if len(matches) == 1:
-                number = matches[0]
-            elif len(matches) > 1:
-                options = ", ".join(f"KA-{n:02d} {KA_TITLES[n]}" for n in matches)
-                raise ValueError(f"Ambiguous KA name '{ka}'. Matches: {options}")
+    number = _resolve_ka_number(ka)
     if number is None or not 1 <= number <= 18:
         raise ValueError(f"Invalid ka '{ka}'. Use a number 1-18 or a KA name such as 'Software Security'.")
     pattern = re.compile(rf"^KA-{number:02d}\b")
@@ -374,6 +383,53 @@ def tool_scan_code_for_violations(constitution, args):  # noqa: ARG001 - uniform
     if language is not None and not isinstance(language, str):
         raise ValueError("Argument 'language' must be a string when supplied.")
     result = scan_code(code, language=language)
+    return json.dumps(result, indent=2)
+
+
+def _require_string_list(args, name):
+    """Optional array-of-strings argument, validated loudly."""
+    value = args.get(name)
+    if value is not None and (
+        not isinstance(value, list) or any(not isinstance(item, str) for item in value)
+    ):
+        raise ValueError(f"Argument '{name}' must be an array of glob strings.")
+    return value
+
+
+def _require_files_map(args):
+    """Optional path -> content object argument, validated loudly."""
+    files = args.get("files")
+    if files is None:
+        return None
+    if not isinstance(files, dict):
+        raise ValueError("Argument 'files' must be an object mapping file paths to file contents.")
+    for path, content in files.items():
+        if not isinstance(content, str):
+            raise ValueError(f"files[{path!r}] must be a string.")
+    return files
+
+
+def tool_review_patch(constitution, args):  # noqa: ARG001 - uniform handler signature
+    """Review a unified diff with the diff-aware constitution gate.
+
+    `constitution` is unused: the review is purely static. The caller (an
+    agent driving `gh pr diff`, or the persona-pr-review CLI) supplies the
+    diff and, for full fidelity, the new-version file contents; this server
+    performs no network I/O by design.
+    """
+    diff_text = args.get("diff")
+    if not isinstance(diff_text, str) or not diff_text.strip():
+        raise ValueError("Argument 'diff' is required and must be a non-empty unified diff string.")
+    require_tests = args.get("require_tests", "off")
+    if require_tests not in ("off", "warn", "fail"):
+        raise ValueError("Argument 'require_tests' must be one of: off, warn, fail.")
+    result = review_patch(
+        diff_text,
+        file_contents=_require_files_map(args),
+        exclude=_require_string_list(args, "exclude"),
+        require_tests=require_tests,
+        test_globs=_require_string_list(args, "test_globs"),
+    )
     return json.dumps(result, indent=2)
 
 
@@ -449,7 +505,8 @@ TOOLS = {
         "handler": tool_scan_code_for_violations,
         "description": (
             "Statically scan code for Zero-Framework-Tolerance violations: TODO/FIXME markers, "
-            "stub bodies (pass/.../NotImplementedError/todo!()/panic()), empty function and catch "
+            "stub bodies (pass, ellipsis, NotImplementedError, unimplemented macros, panic stubs), "
+            "empty function and catch "
             "bodies across Python, JavaScript, TypeScript, Java, Go and Rust, scaffold deception "
             "phrases ('rest of the implementation', 'omitted for brevity'), and iteration-deferral "
             "phrases ('left as an exercise', 'you can extend this'). Backed by the CodebaseCSI "
@@ -473,6 +530,65 @@ TOOLS = {
                 },
             },
             "required": ["code"],
+            "additionalProperties": False,
+        },
+    },
+    "review_patch": {
+        "handler": tool_review_patch,
+        "description": (
+            "Review a unified diff (git diff / gh pr diff output) against the Zero-Framework-"
+            "Tolerance rules. Every changed code file is scanned with the full engine union "
+            "(CodebaseCSI, constitution prose rules, Python AST, tree-sitter xast) and findings "
+            "are attributed to the lines the change introduces; pre-existing debt in touched "
+            "files is counted separately and never fails the gate. Supply `files` (path -> full "
+            "new-version content) for full-fidelity AST analysis; without it, added lines are "
+            "scanned as fragments. Returns JSON: verdict (FAIL/REVIEW/PASS), per-file findings "
+            "with new-file line numbers, totals, and the engines that ran. Deterministic and "
+            "offline: fetch the diff yourself (e.g. `gh pr diff`) and post reviews yourself. A "
+            "PASS gates nothing but markers - gates G1-G5 remain the reviewer's responsibility."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "diff": {
+                    "type": "string",
+                    "description": "Unified diff text, e.g. from `git diff` or `gh pr diff`.",
+                },
+                "files": {
+                    "type": "object",
+                    "description": (
+                        "Optional map of changed-file path (new version) to its complete file "
+                        "content, enabling full-file AST analysis instead of fragment scanning."
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+                "exclude": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional fnmatch globs for paths the gate must not judge: detector rule "
+                        "definitions and test fixture corpora contain hunted patterns as data."
+                    ),
+                },
+                "require_tests": {
+                    "type": "string",
+                    "enum": ["off", "warn", "fail"],
+                    "description": (
+                        "C-03 enforcement: flag production-logic changes when the diff touches no "
+                        "test files. 'warn' surfaces them for judgement, 'fail' gates the verdict. "
+                        "Default off; the reviewing agent should normally pass 'warn'."
+                    ),
+                },
+                "test_globs": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Project-specific test path globs added to the built-in conventions "
+                        "(tests/*, test_*.py, *.spec.ts, *_test.go, ...)."
+                    ),
+                },
+            },
+            "required": ["diff"],
             "additionalProperties": False,
         },
     },
@@ -551,6 +667,25 @@ REQUEST_HANDLERS = {
 }
 
 
+def _route(message, constitution):
+    """Resolve and invoke the handler for a well-formed request message."""
+    method = message["method"]
+    request_id = message.get("id")
+    if method.startswith("notifications/"):
+        return None
+    handler = REQUEST_HANDLERS.get(method)
+    if handler is None:
+        return make_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
+    params = message.get("params") or {}
+    if not isinstance(params, dict):
+        return make_error(request_id, INVALID_PARAMS, "params must be an object.")
+    try:
+        return handler(params, request_id, constitution)
+    except Exception as exc:  # noqa: BLE001 - protocol boundary: convert to JSON-RPC error, never crash the transport.
+        print(f"persona-constitution internal error in {method}: {exc}", file=sys.stderr, flush=True)
+        return make_error(request_id, INTERNAL_ERROR, f"Internal error: {exc}")
+
+
 def dispatch(message, constitution):
     """Route one parsed JSON-RPC message. Returns a response dict or None
     (None for notifications, which must not receive responses)."""
@@ -560,29 +695,11 @@ def dispatch(message, constitution):
             INVALID_REQUEST,
             "Not a valid JSON-RPC 2.0 message.",
         )
-    method = message.get("method")
-    request_id = message.get("id")
     is_notification = "id" not in message
-    if not isinstance(method, str):
-        return None if is_notification else make_error(request_id, INVALID_REQUEST, "Missing method.")
-    if method.startswith("notifications/"):
-        return None
-    handler = REQUEST_HANDLERS.get(method)
-    if handler is None:
-        return (
-            None
-            if is_notification
-            else make_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
-        )
-    params = message.get("params") or {}
-    if not isinstance(params, dict):
-        return make_error(request_id, INVALID_PARAMS, "params must be an object.")
-    try:
-        response = handler(params, request_id, constitution)
-        return None if is_notification else response
-    except Exception as exc:  # noqa: BLE001 - protocol boundary: convert to JSON-RPC error, never crash the transport.
-        print(f"persona-constitution internal error in {method}: {exc}", file=sys.stderr, flush=True)
-        return None if is_notification else make_error(request_id, INTERNAL_ERROR, f"Internal error: {exc}")
+    if not isinstance(message.get("method"), str):
+        return None if is_notification else make_error(message.get("id"), INVALID_REQUEST, "Missing method.")
+    response = _route(message, constitution)
+    return None if is_notification else response
 
 
 def serve(stdin, stdout, constitution):

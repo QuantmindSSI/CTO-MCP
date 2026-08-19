@@ -22,11 +22,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from codebase_csi.analyzers.mock_detector import MockCodeDetector
-
 from persona_constitution import scanner
+from persona_constitution.ast_bridge import xast_findings
 
-# Baseline the union must not regress below. Update only with evidence.
-UNION_BASELINE = 26
+# The constitution-xast engine is active only when the optional `ast` extra
+# (tree-sitter + grammars) is installed. Seven corpus cases are decidable only
+# on a real syntax tree, so the baseline is environment-aware: one number for
+# each configuration, both enforced in CI. Update only with evidence.
+XAST_ACTIVE = xast_findings("function probe() {\n}\n", "javascript")[1]
+UNION_BASELINE = 37 if XAST_ACTIVE else 30
 
 # (name, source, language) for code that MUST produce a FAIL verdict.
 VIOLATIONS = [
@@ -51,10 +55,28 @@ VIOLATIONS = [
     ("starting point", "# This is a starting point; you can extend this to handle retries\n", "python"),
     ("rust todo macro", "fn parse(s: &str) -> Ast {\n    todo!()\n}\n", "rust"),
     ("omitted for brevity", "// remaining handlers omitted for brevity\n", "javascript"),
-    # Known miss: graded REVIEW, not FAIL. A body of `return null;` is a stub in
-    # generated code but legitimate in hand-written lookups, so it is reported as
-    # a warning. Retained in the corpus so the union's score stays honest.
+    # Detectable only with the xast engine (the `ast` extra). Without real AST
+    # parsing these grade REVIEW or PASS; the environment-aware baseline above
+    # records them as accepted misses in that configuration.
     ("hardcoded null return", "function getUser(id) {\n  return null;\n}\n", "javascript"),
+    (
+        "java unsupported op stub",
+        "class Store {\n    void save(User u) {\n        throw new UnsupportedOperationException();\n    }\n}\n",
+        "java",
+    ),
+    (
+        "ts template literal throw",
+        "function migrate(): void {\n  throw new Error(`not implemented`);\n}\n",
+        "typescript",
+    ),
+    ("ruby empty method", "def process(record)\nend\n", "ruby"),
+    ("go nil return stub", "package db\nfunc GetUser(id int) *User {\n\treturn nil\n}\n", "go"),
+    ("js named arrow stub", "const getUser = (id) => {\n  return null;\n};\n", "javascript"),
+    (
+        "ts named function expression stub",
+        "const isValid = function (token) {\n  return true;\n};\n",
+        "typescript",
+    ),
 ]
 
 # (name, source, language) for legitimate code that must NOT produce a FAIL.
@@ -96,6 +118,13 @@ LEGITIMATE = [
         "function handler(req, res) {\n  const id = req.params.id;\n  res.json({ id });\n}\n",
         "javascript",
     ),
+    # Guards on the xast engine's deliberate exemptions: anonymous no-op
+    # callbacks and empty constructors are idioms, not stubs.
+    ("anonymous noop callback", "emitter.on('error', function () {});\n", "javascript"),
+    ("java empty constructor", "public class Widget {\n    public Widget() {\n    }\n}\n", "java"),
+    # Deep-logic rules must warn (REVIEW), never FAIL, on judgement calls.
+    ("noop default arrow", "const onClose = () => {};\n", "javascript"),
+    ("busy wait loop", "function f() {\n  while (!ready()) {}\n  return done();\n}\n", "javascript"),
 ]
 
 

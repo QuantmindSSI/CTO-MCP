@@ -1,0 +1,29 @@
+name: PR Review
+
+# Dogfood: this repository's own pull requests pass through the gate the
+# repository ships. The composite action lives at the repo root (action.yml),
+# so other repositories can consume the identical gate with
+# `uses: QuantmindSSI/CTO-MCP@<tag>`.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  constitution-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run the Zero-Framework-Tolerance gate
+        # Policy (exclusions, C-03 test requirement, business-logic hints)
+        # comes from .persona-review.json so the pre-commit staged gate, this
+        # PR gate, and the review agent enforce the identical contract.
+        uses: ./

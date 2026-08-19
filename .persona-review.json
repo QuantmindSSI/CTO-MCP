@@ -1,0 +1,34 @@
+{
+  "exclude": [
+    "tests/*",
+    "tools/benchmark_scanner.py",
+    "persona_constitution/scanner.py",
+    "persona_constitution/ast_bridge.py",
+    "persona_constitution/logic_rules.py",
+    "codebase_csi/*"
+  ],
+  "fail_on_review": false,
+  "require_tests": "warn",
+  "min_test_trigger_lines": 5,
+  "test_globs": [],
+  "business_logic": {
+    "description": "MCP server + two-factor PR review gate enforcing the Agentic Engineering Persona constitution. The business logic IS detection accuracy: every engine must catch stub/scaffold/deferral violations without accusing legitimate idioms, and verdicts must be reproducible across environments (with and without the tree-sitter extra).",
+    "critical_paths": [
+      "persona_constitution/scanner.py",
+      "persona_constitution/ast_bridge.py",
+      "persona_constitution/logic_rules.py",
+      "persona_constitution/review/*",
+      "persona_constitution/server.py"
+    ],
+    "business_logic_tests": [
+      "tools/benchmark_scanner.py (adversarial accuracy corpus - the product KPI; baselines 37/37 with ast, 30/37 without)",
+      "tests/test_server.py::TestScannerFalsePositiveSuppression (legitimate idioms must never FAIL)",
+      "tests/test_ast_bridge.py::TestDeliberateExemptions (per-language exemption contracts)",
+      "tests/test_review.py (attribution: a PR fails only for lines it introduces)"
+    ],
+    "test_commands": [
+      "python -m unittest discover -s tests",
+      "python tools/benchmark_scanner.py"
+    ]
+  }
+}

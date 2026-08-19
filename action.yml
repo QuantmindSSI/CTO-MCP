@@ -1,0 +1,110 @@
+name: persona-pr-review
+description: >-
+  Deterministic Zero-Framework-Tolerance gate for pull requests. Scans every
+  changed code file with the persona-constitution engine union (CodebaseCSI
+  structural detection, constitution prose rules, Python AST, tree-sitter
+  xast), attributes findings to the lines the PR introduces, annotates them,
+  and optionally posts a review that REQUEST_CHANGES on violations. Never
+  auto-approves.
+
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  github-token:
+    description: Token used to fetch the PR and post the review.
+    required: false
+    default: ${{ github.token }}
+  post-review:
+    description: >-
+      Post the review to the PR ("true"/"false"). Automatically downgraded to
+      annotations-only for pull requests from forks, where the token must not
+      be exposed to untrusted code paths.
+    required: false
+    default: "true"
+  fail-on-review:
+    description: Also fail the check when the verdict is REVIEW (warnings only).
+    required: false
+    default: "false"
+  exclude:
+    description: >-
+      Comma-separated fnmatch globs the gate must not judge (detector rule
+      definitions and test fixture corpora that contain hunted patterns as
+      data). Appended to the repository's .persona-review.json excludes.
+    required: false
+    default: ""
+  require-tests:
+    description: >-
+      C-03 enforcement ("off"/"warn"/"fail"): flag production-logic changes
+      when the diff touches no test files. Empty means "use the repository's
+      .persona-review.json, else warn".
+    required: false
+    default: ""
+  install-ast-extra:
+    description: Install the tree-sitter [ast] extra for full AST fidelity.
+    required: false
+    default: "true"
+  python-version:
+    description: Python used to run the reviewer.
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v6
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install persona-pr-review
+      shell: bash
+      run: |
+        if [ "${{ inputs.install-ast-extra }}" = "true" ]; then
+          pip install --disable-pip-version-check "${{ github.action_path }}[ast]"
+        else
+          pip install --disable-pip-version-check "${{ github.action_path }}"
+        fi
+
+    - name: Review the pull request
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PR_SPEC: ${{ github.repository }}#${{ github.event.pull_request.number }}
+        HEAD_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        POST_REVIEW: ${{ inputs.post-review }}
+        FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
+        EXCLUDE_GLOBS: ${{ inputs.exclude }}
+        REQUIRE_TESTS: ${{ inputs.require-tests }}
+      run: |
+        set -u
+        if [ -z "${{ github.event.pull_request.number }}" ]; then
+          echo "::error::persona-pr-review requires a pull_request event payload"
+          exit 3
+        fi
+
+        args=(--github "$PR_SPEC" --annotate)
+
+        # Fork PRs run with untrusted head code; never attach write actions.
+        if [ "$POST_REVIEW" = "true" ] && [ "$HEAD_IS_FORK" != "true" ]; then
+          args+=(--post)
+        fi
+        if [ "$FAIL_ON_REVIEW" = "true" ]; then
+          args+=(--fail-on-review)
+        fi
+        if [ -n "$REQUIRE_TESTS" ]; then
+          args+=(--require-tests "$REQUIRE_TESTS")
+        fi
+
+        # Comma-separated globs -> repeated --exclude flags.
+        if [ -n "$EXCLUDE_GLOBS" ]; then
+          IFS=',' read -ra globs <<< "$EXCLUDE_GLOBS"
+          for glob in "${globs[@]}"; do
+            trimmed="$(echo "$glob" | xargs)"
+            if [ -n "$trimmed" ]; then
+              args+=(--exclude "$trimmed")
+            fi
+          done
+        fi
+
+        persona-pr-review "${args[@]}"

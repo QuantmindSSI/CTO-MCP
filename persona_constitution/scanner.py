@@ -16,6 +16,14 @@ Neither engine alone is sufficient: measured against an 18-case adversarial
 corpus, CSI scored 9/18 and the prose rules alone scored 3/18. They fail on
 disjoint cases, so the union strictly dominates either.
 
+Non-Python inputs additionally receive `constitution-xast` analysis
+(ast_bridge.py): the vendored CodebaseCSI tree-sitter tier parses the source
+and the structural stub rules are evaluated on real AST nodes, which lets
+judgements regex must leave at warning severity (a body that is a single
+hardcoded `return null;`) be made exactly and emitted as violations. The
+engine is active only when the optional `ast` extra is installed and the
+input parses cleanly; otherwise the regex tier stands alone, unchanged.
+
 Python inputs additionally receive AST-aware analysis, which supplies two
 things regex cannot:
 
@@ -38,6 +46,13 @@ import re
 import tokenize
 
 from codebase_csi.analyzers.mock_detector import MockCodeDetector
+
+try:
+    from .ast_bridge import xast_findings
+    from .logic_rules import python_logic_findings
+except ImportError:  # pragma: no cover - direct module execution
+    from persona_constitution.ast_bridge import xast_findings
+    from persona_constitution.logic_rules import python_logic_findings
 
 # Constitution failure classes.
 CLASS_FRAMEWORK = "Class 1 - Framework Generation"
@@ -215,7 +230,11 @@ PROSE_RULES = [
     ),
     # -- Structural stubs in brace languages (CSI is Python-centric) ------
     (
-        re.compile(r"\b(?:func|function|fn|def)\s+\w+\s*\([^)]*\)[^{;]*\{[\s\n]*\}"),
+        # `def` is deliberately absent: Python empty bodies are the stdlib-AST
+        # engine's jurisdiction and Ruby's braceless `def` can never match a
+        # brace pattern, while a Python function whose body merely contains a
+        # `{}` literal would false-positive here.
+        re.compile(r"\b(?:func|function|fn)\s+\w+\s*\([^)]*\)[^{;]*\{[\s\n]*\}"),
         CLASS_FRAMEWORK,
         "Function declared with an entirely empty body",
         "violation",
@@ -432,7 +451,9 @@ def _body_is_trivial(body):
 
 
 def _python_ast_findings(code):
-    """AST-derived findings for Python: abstract-aware stubs and except/pass.
+    """AST-derived findings for Python: abstract-aware stubs, except/pass, and
+    the deep logic rules (Po10 metrics, empty loops, identical branches,
+    constant conditions, unreachable code).
 
     Returns [] if the source does not parse, leaving regex rules to operate
     alone rather than silently reporting a clean scan.
@@ -442,7 +463,7 @@ def _python_ast_findings(code):
     except (SyntaxError, ValueError):
         return []
 
-    findings = []
+    findings = python_logic_findings(tree)
     abstract_class_lines = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
@@ -532,18 +553,72 @@ def _is_python(code, language):
         return False
 
 
-def _csi_findings(code, language):
-    """Run CodebaseCSI's MockCodeDetector and normalise its output."""
+# Trigger vocabulary of CodebaseCSI's docstring_todo rule, used to verify its
+# hits against real docstrings resolved through the AST.
+_DOCSTRING_TRIGGER_RE = re.compile(r"TODO|FIXME|placeholder|not implemented", re.IGNORECASE)
+
+
+def _python_trigger_docstring_ranges(code):
+    """Line ranges of real docstrings that contain incomplete-work triggers.
+
+    Regex cannot decide triple-quote parity: a pattern anchored on triple
+    quotes will happily match from one docstring's closing quotes to the next
+    one's opening quotes, swallowing the code between. The AST knows which
+    strings are actually docstrings, so CSI docstring findings are verified
+    against these ranges. Returns None when the source does not parse (no
+    verification possible - findings are then kept as reported).
+    """
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    ranges = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = getattr(node, "body", [])
+        if not body or not isinstance(body[0], ast.Expr):
+            continue
+        value = body[0].value
+        is_docstring = isinstance(value, ast.Constant) and isinstance(value.value, str)
+        if is_docstring and _DOCSTRING_TRIGGER_RE.search(value.value):
+            ranges.append((body[0].lineno, body[0].end_lineno or body[0].lineno))
+    return ranges
+
+
+def _docstring_finding_is_verified(line_number, trigger_ranges):
+    """True when a docstring_todo hit lies inside a genuine trigger docstring."""
+    if trigger_ranges is None:
+        return True
+    return any(start <= line_number <= end for start, end in trigger_ranges)
+
+
+def _csi_findings(code, language, is_python):
+    """Run CodebaseCSI's MockCodeDetector and normalise its output.
+
+    Python sources get one extra verification step: docstring_todo hits are
+    kept only when they fall inside a real docstring (per the AST) that
+    genuinely contains a trigger word.
+    """
     try:
         result = _CSI_DETECTOR.analyze(code, language=language or "python")
     except Exception as error:  # noqa: BLE001 - a detector fault must not abort the scan
         return [], f"CodebaseCSI detector failed: {type(error).__name__}: {error}"
+
+    trigger_ranges = _python_trigger_docstring_ranges(code) if is_python else None
 
     findings = []
     for pattern in result.get("patterns", []):
         pattern_type = getattr(pattern, "pattern_type", None)
         line_number = getattr(pattern, "line_number", 0)
         confidence = getattr(pattern, "confidence", 0.0)
+        if (
+            is_python
+            # MockCodeDetector emits category-prefixed names ("todo_docstring_todo").
+            and (pattern_type or "").endswith("docstring_todo")
+            and not _docstring_finding_is_verified(line_number, trigger_ranges)
+        ):
+            continue
         findings.append(
             {
                 "line": line_number,
@@ -618,12 +693,21 @@ def scan_code(code, language=None):
     treat_as_python = _is_python(code, language)
     string_spans = _python_data_string_spans(code) if treat_as_python else _generic_data_string_spans(code)
 
-    findings, csi_error = _csi_findings(code, language)
+    findings, csi_error = _csi_findings(code, language, treat_as_python)
     findings.extend(_prose_findings(code, string_spans))
 
     engines = ["constitution-prose"]
     if csi_error is None:
         engines.append("codebase-csi")
+
+    if not treat_as_python:
+        # Real AST analysis for brace languages via the vendored tree-sitter
+        # tier. Inactive (no grammar installed, unparseable input, unknown
+        # language) contributes nothing and the regex tier stands alone.
+        xfindings, xactive = xast_findings(code, language)
+        if xactive:
+            engines.append("constitution-xast")
+            findings.extend(xfindings)
 
     if treat_as_python:
         engines.append("constitution-ast")

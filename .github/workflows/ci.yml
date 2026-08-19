@@ -38,17 +38,22 @@ jobs:
         # The floor and the ceiling of the range declared in requires-python.
         # 3.9 is here to keep that claim honest rather than aspirational.
         python-version: ["3.9", "3.14"]
+        # Both scanner configurations are supported and both are enforced:
+        # without the extra the tree-sitter tier must degrade cleanly, with it
+        # the xast engine must hit its higher benchmark baseline.
+        extras: ["", "[ast]"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its dependencies
-        run: pip install --disable-pip-version-check .
+        run: pip install --disable-pip-version-check ".${{ matrix.extras }}"
       - name: Run the test suite
         run: python -m unittest discover -s tests -v
       - name: Scanner accuracy benchmark
-        # Exits non-zero if the union detection rate regresses below its baseline.
+        # Exits non-zero if the union detection rate regresses below the
+        # baseline for this configuration (33/33 with [ast], 28/33 without).
         run: python tools/benchmark_scanner.py
 
   packaging:
