@@ -44,11 +44,13 @@ from pathlib import Path
 # dependency is fatal and reported loudly: a silently degraded scanner would
 # report clean results for code it never actually inspected.
 try:
+    from ._version import __version__
     from .review.engine import review_patch
     from .scanner import scan_code
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
+        from persona_constitution._version import __version__
         from persona_constitution.review.engine import review_patch
         from persona_constitution.scanner import scan_code
     except ImportError as _scanner_error:
@@ -64,7 +66,14 @@ except ImportError:
         raise SystemExit(1) from _scanner_error
 
 PROTOCOL_VERSION = "2025-06-18"
-SERVER_INFO = {"name": "persona-constitution", "version": "3.2.0"}
+# Every MCP protocol revision this server implements. The initialize handshake
+# echoes the client's requested version only when it is in this set; anything
+# else is answered with PROTOCOL_VERSION (the spec's required behaviour:
+# offer the latest supported version, never parrot an unknown one).
+SUPPORTED_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
+# Version is single-sourced from pyproject.toml via _version.py; a literal
+# here would drift from the packaged truth (and did, before 3.3.0).
+SERVER_INFO = {"name": "persona-constitution", "version": __version__}
 PACKAGE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_ROOT.parent
 
@@ -239,14 +248,31 @@ def find_subsection(text, pattern):
 # analysis, and - when the optional `ast` extra is installed - the
 # constitution-xast tree-sitter engine for brace languages (ast_bridge.py).
 #
-# Measured on the adversarial 33-case corpus in tools/benchmark_scanner.py:
-# CodebaseCSI alone 15/33 (45%), prose rules alone 22/33 (66%), the union
-# 33/33 with the `ast` extra and 28/33 without it (the delta is the five
-# corpus cases only real AST parsing can decide). Reproduce with
+# Measured on the adversarial 37-case corpus (24 violations, 13 legitimate)
+# in tools/benchmark_scanner.py: prose rules alone 24/37 (64%), the shipped
+# union 37/37 with the `ast` extra and 30/37 without it (the delta is the
+# cases only real tree-sitter parsing can decide). Reproduce with
 # `python tools/benchmark_scanner.py`; do not edit these numbers without
 # rerunning it.
 
 MAX_SCAN_BYTES = 2_000_000
+
+# Bounds for review_patch payloads (Power of 10 rule 3: bound all resource
+# growth). The diff cap absorbs any PR a human could plausibly review; the
+# files cap bounds the full-content map that enables AST analysis. Both fail
+# loudly with instructions rather than degrading.
+MAX_REVIEW_DIFF_CHARS = 10_000_000
+MAX_REVIEW_FILES_TOTAL_CHARS = 20_000_000
+
+# Transport-frame ceiling for one newline-delimited JSON-RPC message, sized
+# above the largest legitimate tool payload plus JSON-escaping overhead.
+# Checked before json.loads so an oversized frame costs one buffered string,
+# not a parsed object tree plus handler amplification. (The line itself is
+# already in memory by the time we can measure it - bounding the read would
+# require abandoning line iteration for manual framing, which is not worth
+# the complexity for a stdio transport whose client is a local process
+# spending its own memory.)
+MAX_MESSAGE_CHARS = 50_000_000
 
 
 # --------------------------------------------------------------------------
@@ -397,15 +423,23 @@ def _require_string_list(args, name):
 
 
 def _require_files_map(args):
-    """Optional path -> content object argument, validated loudly."""
+    """Optional path -> content object argument, validated loudly and bounded."""
     files = args.get("files")
     if files is None:
         return None
     if not isinstance(files, dict):
         raise ValueError("Argument 'files' must be an object mapping file paths to file contents.")
+    total_chars = 0
     for path, content in files.items():
         if not isinstance(content, str):
             raise ValueError(f"files[{path!r}] must be a string.")
+        total_chars += len(content)
+    if total_chars > MAX_REVIEW_FILES_TOTAL_CHARS:
+        raise ValueError(
+            f"Argument 'files' totals {total_chars} characters, over the "
+            f"{MAX_REVIEW_FILES_TOTAL_CHARS} limit; supply contents only for the changed files, "
+            "or omit 'files' to fall back to fragment scanning."
+        )
     return files
 
 
@@ -420,6 +454,11 @@ def tool_review_patch(constitution, args):  # noqa: ARG001 - uniform handler sig
     diff_text = args.get("diff")
     if not isinstance(diff_text, str) or not diff_text.strip():
         raise ValueError("Argument 'diff' is required and must be a non-empty unified diff string.")
+    if len(diff_text) > MAX_REVIEW_DIFF_CHARS:
+        raise ValueError(
+            f"Argument 'diff' is {len(diff_text)} characters, over the {MAX_REVIEW_DIFF_CHARS} "
+            "limit; review the change in smaller units."
+        )
     require_tests = args.get("require_tests", "off")
     if require_tests not in ("off", "warn", "fail"):
         raise ValueError("Argument 'require_tests' must be one of: off, warn, fail.")
@@ -609,9 +648,10 @@ def make_error(request_id, code, message):
 
 
 def handle_initialize(params, request_id, _constitution):
-    client_version = params.get("protocolVersion", PROTOCOL_VERSION)
-    # Echo the client's requested version when it is a string; otherwise offer ours.
-    version = client_version if isinstance(client_version, str) else PROTOCOL_VERSION
+    client_version = params.get("protocolVersion")
+    # Echo the client's version only when this server actually implements it;
+    # for unknown or malformed values, offer the latest version we support.
+    version = client_version if client_version in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
     return make_result(
         request_id,
         {
@@ -707,6 +747,20 @@ def serve(stdin, stdout, constitution):
     to `stdout`, until `stdin` reaches EOF. Flushes after every response so the
     client never blocks on a buffered reply."""
     for raw_line in stdin:
+        if len(raw_line) > MAX_MESSAGE_CHARS:
+            stdout.write(
+                json.dumps(
+                    make_error(
+                        None,
+                        INVALID_REQUEST,
+                        f"Message of {len(raw_line)} characters exceeds the "
+                        f"{MAX_MESSAGE_CHARS} character frame limit.",
+                    )
+                )
+                + "\n"
+            )
+            stdout.flush()
+            continue
         line = raw_line.strip()
         if not line:
             continue

@@ -6,6 +6,7 @@ review engine, and the JSON-RPC dispatch layer so they can be imported and
 tested directly, independent of the stdio transport.
 """
 
+from ._version import __version__
 from .review.engine import review_patch
 from .scanner import (
     PROSE_RULES,
@@ -27,8 +28,6 @@ from .server import (
     serve,
     split_headings,
 )
-
-__version__ = "3.2.0"
 
 __all__ = [
     "DEPRECATED_SECTION_ALIASES",

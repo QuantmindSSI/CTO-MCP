@@ -40,7 +40,10 @@ class GitHubClient:
     """Authenticated client scoped to one API base URL."""
 
     def __init__(self, token, api_url=DEFAULT_API_URL):
-        assert token, "a GitHub token is required (GITHUB_TOKEN)"
+        # Explicit raise, not assert: auth-input validation must survive
+        # `python -O`, which strips assert statements.
+        if not token:
+            raise ValueError("a GitHub token is required (GITHUB_TOKEN)")
         self._token = token
         self._api_url = api_url.rstrip("/")
 
