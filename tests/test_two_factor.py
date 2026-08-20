@@ -274,7 +274,12 @@ class TestHookInstallerAndCommitBlocking(unittest.TestCase):
             self.assertEqual(code, cli.EXIT_OK)
             content = foreign.read_text(encoding="utf-8")
             self.assertIn("persona-pr-review pre-commit gate", content)
-            self.assertTrue(foreign.stat().st_mode & stat.S_IXUSR)
+            if os.name == "posix":
+                # Execute bits are a POSIX concept; NTFS has none and
+                # os.chmod on Windows only toggles the read-only flag.
+                # Git for Windows runs hooks through sh regardless, so the
+                # executable requirement is real only where the bit exists.
+                self.assertTrue(foreign.stat().st_mode & stat.S_IXUSR)
 
     def test_installed_hook_blocks_a_real_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
