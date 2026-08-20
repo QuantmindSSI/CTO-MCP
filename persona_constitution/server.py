@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 # The scanner backend lives in a sibling module and depends on `codebase-csi`.
@@ -708,11 +709,16 @@ REQUEST_HANDLERS = {
 
 
 def _route(message, constitution):
-    """Resolve and invoke the handler for a well-formed request message."""
+    """Resolve and invoke the handler for a well-formed message.
+
+    Unknown methods - including the notifications/* family, which this
+    server has no handlers for - uniformly produce METHOD_NOT_FOUND here;
+    dispatch() then discards the response when the message carried no id.
+    That split keeps the JSON-RPC contract exact in both directions: an
+    id-less notification gets silence, while a client that attaches an id
+    to notifications/initialized has sent a request and gets its answer."""
     method = message["method"]
     request_id = message.get("id")
-    if method.startswith("notifications/"):
-        return None
     handler = REQUEST_HANDLERS.get(method)
     if handler is None:
         return make_error(request_id, METHOD_NOT_FOUND, f"Method not found: {method}")
@@ -727,53 +733,121 @@ def _route(message, constitution):
 
 
 def dispatch(message, constitution):
-    """Route one parsed JSON-RPC message. Returns a response dict or None
-    (None for notifications, which must not receive responses)."""
+    """Route one parsed JSON-RPC message. Returns a response dict or None.
+
+    Silence is reserved for well-formed notifications: a dict with
+    jsonrpc "2.0", a string method, and no id. A malformed object cannot
+    be trusted to be a notification - the missing id may itself be part of
+    the malformation - so it gets an id-null Invalid Request response,
+    exactly as the JSON-RPC 2.0 specification's own examples answer
+    `{"jsonrpc": "2.0", "method": 1}`."""
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return make_error(
             message.get("id") if isinstance(message, dict) else None,
             INVALID_REQUEST,
             "Not a valid JSON-RPC 2.0 message.",
         )
-    is_notification = "id" not in message
     if not isinstance(message.get("method"), str):
-        return None if is_notification else make_error(message.get("id"), INVALID_REQUEST, "Missing method.")
+        return make_error(message.get("id"), INVALID_REQUEST, "Missing method.")
     response = _route(message, constitution)
-    return None if is_notification else response
+    return None if "id" not in message else response
 
 
-def serve(stdin, stdout, constitution):
+def _debug_line(method, tool, frame_chars, response_chars, elapsed_ms):
+    """One structured diagnostics line on stderr.
+
+    Sizes and durations only, never payload content: the code this server
+    scans is other people's unreleased work and must not leak into logs.
+    key=value tokens so the output greps and parses trivially.
+    """
+    print(
+        f"persona-constitution debug: method={method} tool={tool} "
+        f"frame_chars={frame_chars} response_chars={response_chars} "
+        f"elapsed_ms={elapsed_ms:.1f}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _write_response(stdout, response):
+    """Serialise one response, write it as a frame, flush so the client
+    never blocks on a buffered reply. Returns the encoded text (for size
+    diagnostics)."""
+    encoded = json.dumps(response)
+    stdout.write(encoded + "\n")
+    stdout.flush()
+    return encoded
+
+
+def _elapsed_ms(started):
+    return (time.monotonic() - started) * 1000.0
+
+
+def _frame_identity(message):
+    """(method, tool) labels for diagnostics; malformed frames get fixed
+    fallback labels so the log line always has the same shape."""
+    method = message.get("method") if isinstance(message, dict) else None
+    method_label = method if isinstance(method, str) and method else "<invalid>"
+    tool = "-"
+    if method == "tools/call" and isinstance(message.get("params"), dict):
+        requested = message["params"].get("name")
+        if isinstance(requested, str) and requested:
+            tool = requested
+    return method_label, tool
+
+
+def _serve_one(raw_line, stdout, constitution, debug):
+    """Process one raw input line end to end: bound it, parse it, dispatch
+    it, answer it, and (in debug mode) account for it on stderr."""
+    started = time.monotonic()
+    if len(raw_line) > MAX_MESSAGE_CHARS:
+        encoded = _write_response(
+            stdout,
+            make_error(
+                None,
+                INVALID_REQUEST,
+                f"Message of {len(raw_line)} characters exceeds the "
+                f"{MAX_MESSAGE_CHARS} character frame limit.",
+            ),
+        )
+        if debug:
+            _debug_line("<oversized>", "-", len(raw_line), len(encoded), _elapsed_ms(started))
+        return
+    line = raw_line.strip()
+    if not line:
+        return
+    try:
+        message = json.loads(line)
+    except json.JSONDecodeError as exc:
+        encoded = _write_response(stdout, make_error(None, PARSE_ERROR, f"Parse error: {exc}"))
+        if debug:
+            _debug_line("<unparseable>", "-", len(raw_line), len(encoded), _elapsed_ms(started))
+        return
+    response = dispatch(message, constitution)
+    encoded = _write_response(stdout, response) if response is not None else ""
+    if debug:
+        method_label, tool = _frame_identity(message)
+        _debug_line(method_label, tool, len(raw_line), len(encoded), _elapsed_ms(started))
+
+
+def serve(stdin, stdout, constitution, debug=False):
     """Read newline-delimited JSON-RPC messages from `stdin`, write responses
-    to `stdout`, until `stdin` reaches EOF. Flushes after every response so the
-    client never blocks on a buffered reply."""
+    to `stdout`, until `stdin` reaches EOF.
+
+    With `debug` enabled, every frame produces one stderr line with the
+    method, the tool (for tools/call), the frame and response sizes, and the
+    wall-clock cost - enough to diagnose a slow or failing integration at a
+    customer site without ever logging the payloads themselves."""
     for raw_line in stdin:
-        if len(raw_line) > MAX_MESSAGE_CHARS:
-            stdout.write(
-                json.dumps(
-                    make_error(
-                        None,
-                        INVALID_REQUEST,
-                        f"Message of {len(raw_line)} characters exceeds the "
-                        f"{MAX_MESSAGE_CHARS} character frame limit.",
-                    )
-                )
-                + "\n"
-            )
-            stdout.flush()
-            continue
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            message = json.loads(line)
-        except json.JSONDecodeError as exc:
-            stdout.write(json.dumps(make_error(None, PARSE_ERROR, f"Parse error: {exc}")) + "\n")
-            stdout.flush()
-            continue
-        response = dispatch(message, constitution)
-        if response is not None:
-            stdout.write(json.dumps(response) + "\n")
-            stdout.flush()
+        _serve_one(raw_line, stdout, constitution, debug)
+
+
+def _debug_enabled(argv, environ):
+    """Diagnostics opt-in: the --debug flag or a truthy env var. Both exist
+    because MCP hosts differ in which of args and env they let users set."""
+    if "--debug" in argv:
+        return True
+    return environ.get("PERSONA_CONSTITUTION_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def main():
@@ -784,8 +858,16 @@ def main():
     except (FileNotFoundError, ValueError, OSError) as exc:
         print(f"persona-constitution fatal: {exc}", file=sys.stderr, flush=True)
         sys.exit(1)
+    debug = _debug_enabled(sys.argv[1:], os.environ)
+    if debug:
+        print(
+            f"persona-constitution debug: serving version={SERVER_INFO['version']} "
+            f"protocol={PROTOCOL_VERSION} pid={os.getpid()}",
+            file=sys.stderr,
+            flush=True,
+        )
     try:
-        serve(sys.stdin, sys.stdout, constitution)
+        serve(sys.stdin, sys.stdout, constitution, debug=debug)
     except KeyboardInterrupt:
         sys.exit(130)
     except BrokenPipeError:
