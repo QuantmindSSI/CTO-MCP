@@ -67,9 +67,12 @@ jobs:
         # Zero runtime dependencies makes this small, not pointless: it is
         # the machine-readable statement of exactly that fact, plus the
         # vendored codebase_csi provenance recorded where scanners look.
+        # Pinned exactly: this tool's CLI has changed flags across releases
+        # (an unpinned install broke the v3.3.0 release on a flag rename),
+        # and a release pipeline must not absorb upstream surprises.
         run: |
-          pip install --disable-pip-version-check cyclonedx-bom
-          cyclonedx-py environment --output-format json --outfile dist/sbom.cdx.json
+          pip install --disable-pip-version-check "cyclonedx-bom==7.3.1"
+          cyclonedx-py environment --output-format json --output-file dist/sbom.cdx.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

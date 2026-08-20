@@ -5,6 +5,18 @@ All notable changes to persona-constitution-mcp. The format follows
 semantic versioning. Each release's section is what the release workflow
 publishes as the release notes - a tag with no section here does not ship.
 
+## [3.3.1] - 2026-08-20
+
+### Fixed
+
+- The release pipeline's SBOM step used `--outfile`; cyclonedx-bom 7.x
+  spells it `--output-file`, so the v3.3.0 release build failed before
+  publishing anything (the version-match, test, benchmark, wheel-content
+  and twine gates had all passed). The flag is corrected and the tool is
+  now pinned exactly, for the same reason ruff is: a release pipeline
+  must not absorb upstream CLI changes as surprises. v3.3.0's tag remains
+  where it was - tags are immutable here; the fix ships as a new version.
+
 ## [3.3.0] - 2026-08-20
 
 The enterprise-hardening release: the version cannot drift, the trust
@@ -108,6 +120,7 @@ attested, and published from the same bytes.
 - Scanner accuracy benchmark with an environment-aware regression
   baseline (`tools/benchmark_scanner.py`).
 
+[3.3.1]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/4d43eb0...v3.2.0
 [3.1.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/5c0160e...4d43eb0
