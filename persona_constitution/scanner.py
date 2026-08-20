@@ -258,7 +258,21 @@ PROSE_RULES = [
         "structure",
     ),
     (
-        re.compile(r"catch\s*(?:\([^)]*\))?\s*\{[\s\n]*(?:/\*.*?\*/|//[^\n]*)?[\s\n]*\}", re.DOTALL),
+        # The block-comment arm is deliberately bounded and unrolled
+        # (/\*[^*]{0,120}(\*(?!/)[^*]{0,120}){0,6}\*/) instead of the obvious
+        # /\*.*?\*/ with DOTALL: the lazy scan re-reads to end-of-input for
+        # every unclosed "catch {/*" occurrence, which is quadratic - a 1MB
+        # adversarial file hung the scanner for minutes (measured; see
+        # tests/test_scan_budget.py). The bound means a comment inside an
+        # empty catch is recognised up to ~840 characters, which covers any
+        # honest "deliberately ignored" note; a longer comment stops the
+        # block matching as empty, a miss we accept for immunity to
+        # catastrophic scanning.
+        re.compile(
+            r"catch\s*(?:\([^)]*\))?\s*\{[\s\n]*"
+            r"(?:/\*[^*]{0,120}(?:\*(?!/)[^*]{0,120}){0,6}\*/|//[^\n]*)?"
+            r"[\s\n]*\}"
+        ),
         CLASS_CONFIDENCE,
         "Empty catch block: silently swallowed exception",
         "violation",
