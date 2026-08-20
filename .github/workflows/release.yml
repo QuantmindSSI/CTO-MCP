@@ -1,0 +1,141 @@
+name: Release
+
+# Fires on version tags only. The artifact that reaches users is the artifact
+# that was attested: built once, uploaded, then published from the same
+# bytes - never rebuilt between steps.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: The tag must match the declared version
+        # A v3.3.0 tag on a pyproject.toml that says 3.2.0 is a lie in the
+        # making; refuse to build it.
+        run: |
+          python - "${GITHUB_REF_NAME}" <<'PY'
+          import sys
+          sys.path.insert(0, ".")
+          from persona_constitution._version import resolve_version
+          tag = sys.argv[1]
+          declared = f"v{resolve_version()}"
+          if tag != declared:
+              sys.exit(f"tag {tag} does not match declared version {declared}")
+          print(f"OK: {tag} matches pyproject.toml")
+          PY
+
+      - name: Run the full test suite before anything ships
+        run: |
+          pip install --disable-pip-version-check ".[ast]"
+          python -m unittest discover -s tests
+          python tools/benchmark_scanner.py
+
+      - name: Build sdist and wheel
+        run: |
+          pip install --disable-pip-version-check build twine
+          python -m build
+          twine check dist/*
+
+      - name: Assert the data files are inside the wheel
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+          wheel = glob.glob("dist/*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          required = [
+              "persona_constitution/data/CONSTITUTION.md",
+              "persona_constitution/data/DIRECTIVES.md",
+          ]
+          missing = [r for r in required if r not in names]
+          if missing:
+              sys.exit(f"wheel {wheel} is missing {missing}")
+          print(f"OK: {wheel} carries both data files")
+          PY
+
+      - name: Generate a CycloneDX SBOM
+        # Zero runtime dependencies makes this small, not pointless: it is
+        # the machine-readable statement of exactly that fact, plus the
+        # vendored codebase_csi provenance recorded where scanners look.
+        run: |
+          pip install --disable-pip-version-check cyclonedx-bom
+          cyclonedx-py environment --output-format json --outfile dist/sbom.cdx.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  attest-and-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub Release
+      id-token: write # sign the provenance
+      attestations: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+
+      - name: Attest build provenance for the distributions
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+
+      - name: Extract this version's changelog section
+        run: |
+          python - "${GITHUB_REF_NAME}" <<'PY'
+          import re, sys
+          from pathlib import Path
+          version = sys.argv[1].lstrip("v")
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^## \[{re.escape(version)}\].*?(?=^## \[|\Z)"
+          match = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+          if match is None:
+              sys.exit(f"CHANGELOG.md has no section for {version}; releases without notes do not ship")
+          Path("release-notes.md").write_text(match.group(0).strip() + "\n", encoding="utf-8")
+          print(match.group(0).strip())
+          PY
+
+      - name: Create the GitHub Release with the attested artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.whl dist/*.tar.gz dist/sbom.cdx.json \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release-notes.md
+
+  publish-pypi:
+    # Publishes the exact bytes that were attested. Requires the one-time
+    # PyPI trusted-publisher registration described in CONTRIBUTING.md;
+    # until that exists, this job fails alone and the GitHub Release above
+    # still stands.
+    needs: attest-and-release
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI trusted publishing; no stored secrets.
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - name: Remove non-distribution files before upload
+        run: rm -f dist/sbom.cdx.json
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

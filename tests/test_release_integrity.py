@@ -66,6 +66,18 @@ class TestSingleSourcedVersion(unittest.TestCase):
         the handshake (e.g. an empty string or a TOML fragment)."""
         self.assertRegex(self.declared, r"^\d+\.\d+\.\d+")
 
+    def test_changelog_has_a_section_for_the_declared_version(self):
+        """The release workflow refuses a tag with no changelog section;
+        this makes the same discipline fail earlier, at test time. Bumping
+        pyproject.toml without writing the changelog is an incomplete
+        release, so it is an incomplete change."""
+        changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn(
+            f"## [{self.declared}]",
+            changelog,
+            f"CHANGELOG.md has no section for version {self.declared}",
+        )
+
 
 class TestVersionResolver(unittest.TestCase):
     """parse_pyproject_version trusts only this project's own declaration."""
