@@ -12,6 +12,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  security-events: write # SARIF upload to code scanning
 
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
@@ -27,3 +28,5 @@ jobs:
         # comes from .persona-review.json so the pre-commit staged gate, this
         # PR gate, and the review agent enforce the identical contract.
         uses: ./
+        with:
+          sarif-file: persona-review.sarif

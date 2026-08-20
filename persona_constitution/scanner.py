@@ -69,10 +69,12 @@ except ImportError:  # pragma: no cover - direct module execution
     from persona_constitution.logic_rules import python_logic_findings
 
 # One finding in the scanner's JSON schema; one prose rule entry:
-# (compiled pattern, failure class, message, severity, category).
+# (compiled pattern, failure class, message, severity, category, CWE).
+# The CWE is a MITRE weakness ID attached only where the mapping is
+# defensible - None means "no honest mapping exists", never "forgot".
 Finding = dict[str, Any]
 Span = tuple[int, int]
-ProseRule = tuple["Pattern[str]", str, str, str, str]
+ProseRule = tuple["Pattern[str]", str, str, str, str, "str | None"]
 
 # Constitution failure classes.
 CLASS_FRAMEWORK = "Class 1 - Framework Generation"
@@ -103,6 +105,26 @@ _CSI_CLASS_BY_PREFIX = (
 # docstrings survive.
 _SUPPRESSIBLE_IN_STRINGS = frozenset({"marker", "prose"})
 
+# CodebaseCSI pattern_type prefix -> CWE, for the prefixes with a defensible
+# mapping. mock/fake/passthrough/always_success are deliberately absent:
+# MITRE has no precise weakness for them and a wrong ID is worse than none.
+_CSI_CWE_BY_PREFIX = (
+    ("todo", "CWE-546"),  # Suspicious Comment
+    ("empty", "CWE-1071"),  # Empty Code Block
+    ("stub", "CWE-684"),  # Incorrect Provision of Specified Functionality
+    ("placeholder", "CWE-684"),
+    ("print_only", "CWE-489"),  # Active Debug Code
+)
+
+
+def _csi_cwe(pattern_type: str | None) -> str | None:
+    """CWE for a CodebaseCSI pattern_type, or None when no honest mapping exists."""
+    lowered = (pattern_type or "").lower()
+    for prefix, cwe in _CSI_CWE_BY_PREFIX:
+        if lowered.startswith(prefix):
+            return cwe
+    return None
+
 
 def _csi_failure_class(pattern_type: str | None) -> str:
     """Map a CodebaseCSI pattern_type onto a Constitution failure class."""
@@ -132,9 +154,13 @@ def _csi_severity(severity: str | None, confidence: float | None) -> str:
 # Prose and structural rules that CodebaseCSI does not model
 # --------------------------------------------------------------------------
 
-# Each rule: (compiled regex, failure class, description, severity, kind).
+# Each rule: (compiled regex, failure class, description, severity, kind, cwe).
 # `kind` drives string-literal suppression: "prose" and "marker" rules are
 # suppressed inside data strings, "structure" rules are always evaluated.
+# CWE choices: prose/marker deferral text is CWE-546 (Suspicious Comment);
+# empty bodies are CWE-1071 (Empty Code Block); empty catches CWE-1069
+# (Empty Exception Block); stub bodies that fake their contract are
+# CWE-684 (Incorrect Provision of Specified Functionality).
 PROSE_RULES: list[ProseRule] = [
     # -- Class 2: Scaffold Deception -------------------------------------
     (
@@ -143,6 +169,7 @@ PROSE_RULES: list[ProseRule] = [
         "'rest of the implementation ...' - code omitted",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"follows?\s+the\s+same\s+pattern", re.IGNORECASE),
@@ -150,6 +177,7 @@ PROSE_RULES: list[ProseRule] = [
         "'follows the same pattern' - code omitted by analogy",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(
@@ -159,6 +187,7 @@ PROSE_RULES: list[ProseRule] = [
         "Content omitted 'for brevity'",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"for\s+brevity[,\s]+(?:the\s+)?(?:rest|remainder|others?|implementation)", re.IGNORECASE),
@@ -166,6 +195,7 @@ PROSE_RULES: list[ProseRule] = [
         "Content omitted 'for brevity'",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"and\s+so\s+on\s+for\s+the\s+(?:rest|others|remaining)", re.IGNORECASE),
@@ -173,6 +203,7 @@ PROSE_RULES: list[ProseRule] = [
         "'and so on for the rest' - enumeration left unwritten",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"(?:similar|same)\s+(?:for|logic\s+for)\s+the\s+(?:other|remaining|rest)", re.IGNORECASE),
@@ -180,6 +211,7 @@ PROSE_RULES: list[ProseRule] = [
         "'similar for the others' - code omitted by analogy",
         "violation",
         "prose",
+        "CWE-546",
     ),
     # -- Class 5: Iteration Deferral -------------------------------------
     (
@@ -188,6 +220,7 @@ PROSE_RULES: list[ProseRule] = [
         "'left as an exercise' - work pushed to the reader",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"you\s+can\s+(?:extend|expand|build\s+on|adapt)\s+this", re.IGNORECASE),
@@ -195,6 +228,7 @@ PROSE_RULES: list[ProseRule] = [
         "'you can extend this' - verbal handoff instead of implementation",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"(?:this\s+is\s+(?:just\s+)?a|as\s+a)\s+(?:good\s+)?starting\s+point", re.IGNORECASE),
@@ -202,6 +236,7 @@ PROSE_RULES: list[ProseRule] = [
         "'starting point' framing - partial solution offered as complete",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"you\s+(?:would|will|may|might|could)\s+want\s+to\s+add", re.IGNORECASE),
@@ -209,6 +244,7 @@ PROSE_RULES: list[ProseRule] = [
         "'you would want to add ...' - known gap left open",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"(?:full|complete|real|actual|production)\s+implementation\s+would", re.IGNORECASE),
@@ -216,6 +252,7 @@ PROSE_RULES: list[ProseRule] = [
         "'the full implementation would ...' - admission of incompleteness",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"in\s+(?:a\s+)?production[,\s]+you\s+(?:would|should|d\b)", re.IGNORECASE),
@@ -223,6 +260,7 @@ PROSE_RULES: list[ProseRule] = [
         "'in production you would ...' - non-production code delivered",
         "violation",
         "prose",
+        "CWE-546",
     ),
     (
         re.compile(r"\bXXX\b"),
@@ -230,6 +268,7 @@ PROSE_RULES: list[ProseRule] = [
         "XXX marker: unresolved issue left in code",
         "warning",
         "marker",
+        "CWE-546",
     ),
     (
         re.compile(
@@ -240,6 +279,7 @@ PROSE_RULES: list[ProseRule] = [
         "Comment describing unwritten implementation",
         "violation",
         "marker",
+        "CWE-546",
     ),
     (
         re.compile(r"your\s+code\s+(?:goes\s+)?here", re.IGNORECASE),
@@ -247,6 +287,7 @@ PROSE_RULES: list[ProseRule] = [
         "'your code here' placeholder",
         "violation",
         "marker",
+        "CWE-546",
     ),
     # -- Structural stubs in brace languages (CSI is Python-centric) ------
     (
@@ -259,6 +300,7 @@ PROSE_RULES: list[ProseRule] = [
         "Function declared with an entirely empty body",
         "violation",
         "structure",
+        "CWE-1071",
     ),
     (
         re.compile(
@@ -269,6 +311,7 @@ PROSE_RULES: list[ProseRule] = [
         "Method declared with an entirely empty body",
         "violation",
         "structure",
+        "CWE-1071",
     ),
     (
         re.compile(r"\{[\s\n]*return\s+(?:null|nil|undefined|None|0|\"\"|''|false|true)\s*;?[\s\n]*\}"),
@@ -276,6 +319,7 @@ PROSE_RULES: list[ProseRule] = [
         "Function body is a single hardcoded return - no implementation",
         "warning",
         "structure",
+        "CWE-684",
     ),
     (
         # The block-comment arm is deliberately bounded and unrolled
@@ -297,6 +341,7 @@ PROSE_RULES: list[ProseRule] = [
         "Empty catch block: silently swallowed exception",
         "violation",
         "structure",
+        "CWE-1069",
     ),
     (
         re.compile(
@@ -308,6 +353,7 @@ PROSE_RULES: list[ProseRule] = [
         "'not implemented' exception stub",
         "violation",
         "structure",
+        "CWE-684",
     ),
     (
         re.compile(r"panic\s*\(\s*[\"`][^\"`]*(?:not\s*implemented|unimplemented|TODO)", re.IGNORECASE),
@@ -315,6 +361,7 @@ PROSE_RULES: list[ProseRule] = [
         "Go panic() used as an unimplemented stub",
         "violation",
         "structure",
+        "CWE-684",
     ),
     (
         re.compile(r"\b(?:unimplemented!|todo!)\s*\("),
@@ -322,6 +369,7 @@ PROSE_RULES: list[ProseRule] = [
         "Rust unimplemented!()/todo!() macro stub",
         "violation",
         "structure",
+        "CWE-684",
     ),
 ]
 
@@ -523,6 +571,7 @@ def _python_ast_findings(code: str) -> list[Finding]:
                     "finding": f"Function '{node.name}' has no implementation (body is pass/... only)",
                     "severity": "violation",
                     "source": "constitution-ast",
+                    "cwe": "CWE-1071",
                 }
             )
         elif isinstance(node, ast.ExceptHandler):
@@ -536,6 +585,7 @@ def _python_ast_findings(code: str) -> list[Finding]:
                         "finding": "Bare 'except: pass' - every exception silently swallowed",
                         "severity": "violation",
                         "source": "constitution-ast",
+                        "cwe": "CWE-1069",
                     }
                 )
             else:
@@ -549,6 +599,7 @@ def _python_ast_findings(code: str) -> list[Finding]:
                         ),
                         "severity": "warning",
                         "source": "constitution-ast",
+                        "cwe": "CWE-1069",
                     }
                 )
     return findings
@@ -656,37 +707,40 @@ def _csi_findings(code: str, language: str | None, is_python: bool) -> tuple[lis
             and not _docstring_finding_is_verified(line_number, trigger_ranges)
         ):
             continue
-        findings.append(
-            {
-                "line": line_number,
-                "class": _csi_failure_class(pattern_type),
-                "finding": getattr(pattern, "description", pattern_type or "mock pattern"),
-                "severity": _csi_severity(getattr(pattern, "severity", ""), confidence),
-                "source": "codebase-csi",
-                "confidence": round(float(confidence), 2),
-                "suggestion": getattr(pattern, "suggestion", ""),
-            }
-        )
+        finding: Finding = {
+            "line": line_number,
+            "class": _csi_failure_class(pattern_type),
+            "finding": getattr(pattern, "description", pattern_type or "mock pattern"),
+            "severity": _csi_severity(getattr(pattern, "severity", ""), confidence),
+            "source": "codebase-csi",
+            "confidence": round(float(confidence), 2),
+            "suggestion": getattr(pattern, "suggestion", ""),
+        }
+        cwe = _csi_cwe(pattern_type)
+        if cwe is not None:
+            finding["cwe"] = cwe
+        findings.append(finding)
     return findings, None
 
 
 def _prose_findings(code: str, string_spans: list[Span]) -> list[Finding]:
     """Apply the Constitution prose and structural rules with span masking."""
     findings: list[Finding] = []
-    for regex, failure_class, description, severity, kind in PROSE_RULES:
+    for regex, failure_class, description, severity, kind, cwe in PROSE_RULES:
         suppressible = kind in _SUPPRESSIBLE_IN_STRINGS
         for match in regex.finditer(code):
             if suppressible and _in_spans(match.start(), string_spans):
                 continue
-            findings.append(
-                {
-                    "line": code.count("\n", 0, match.start()) + 1,
-                    "class": failure_class,
-                    "finding": description,
-                    "severity": severity,
-                    "source": "constitution-prose",
-                }
-            )
+            finding: Finding = {
+                "line": code.count("\n", 0, match.start()) + 1,
+                "class": failure_class,
+                "finding": description,
+                "severity": severity,
+                "source": "constitution-prose",
+            }
+            if cwe is not None:
+                finding["cwe"] = cwe
+            findings.append(finding)
     return findings
 
 
@@ -719,7 +773,8 @@ def scan_code(code: str, language: str | None = None) -> dict[str, Any]:
                      otherwise "PASS".
           summary  - Human-readable disposition and required next action.
           findings - List of findings sorted by line, each with line, class,
-                     finding, severity and source.
+                     finding, severity and source, plus a MITRE `cwe` ID
+                     where a defensible mapping exists.
           engines  - Which detection engines contributed to this scan.
 
     Complexity: O(R x N) for R rules over N characters, plus one AST parse and
