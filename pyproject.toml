@@ -31,7 +31,7 @@ classifiers = [
 [project.optional-dependencies]
 # Pinned exactly: an unpinned linter turns an upstream release into a red build
 # on a commit that changed nothing. Bump deliberately.
-dev = ["ruff==0.16.2", "mypy==1.19.1", "mutmut==3.3.1", "pytest==8.4.2"]
+dev = ["ruff==0.16.3", "mypy==1.19.1", "mutmut==3.3.1", "pytest==8.4.2"]
 # Optional tree-sitter tier for the vendored CodebaseCSI ASTParser. Without it
 # the scanner still runs: Python uses the stdlib ast engine and other languages
 # fall back to the constitution's structural regex rules.
@@ -81,6 +81,14 @@ codebase_csi = ["VENDORED.md"]
 [tool.mypy]
 # Strict on the shipped package; the version is the requires-python floor so
 # typing that only works on newer interpreters fails here, not at install.
+#
+# tests/ is deliberately outside this gate - a reviewed decision, not an
+# omission. Measured (mypy 1.19.1, relaxed profile): 65 findings, of which
+# 45 are implicit-reexport import hygiene and every remaining arg-type hit
+# is a test deliberately passing garbage (scan_code(None),
+# GitHubClient(None)) to verify rejection - which is the suite's job.
+# Typing that away would mean casting adversarial inputs, weakening the
+# very tests. Re-evaluate if the test helpers grow real API surface.
 python_version = "3.9"
 strict = true
 files = ["persona_constitution"]
@@ -149,4 +157,17 @@ paths_to_mutate = [
 tests_dir = ["tests/"]
 # The sandbox copies only Python sources by default; these are the data
 # files the suite legitimately reads.
-also_copy = ["CHANGELOG.md", "pyproject.toml", "tools/", "persona_constitution/data/", ".persona-review.json"]
+also_copy = [
+  "CHANGELOG.md",
+  "pyproject.toml",
+  "tools/",
+  "persona_constitution/data/",
+  ".persona-review.json",
+  # mutmut only materialises the mutated files of a package directory; the
+  # unmutated siblings must ride along or the sandbox package is incomplete.
+  "persona_constitution/review/__init__.py",
+  "persona_constitution/review/cli.py",
+  "persona_constitution/review/config.py",
+  "persona_constitution/review/github_client.py",
+  "persona_constitution/review/report.py",
+]
