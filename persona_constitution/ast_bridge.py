@@ -272,15 +272,25 @@ def _is_constructor(node: Any, name: str | None) -> bool:
     return name == "constructor"
 
 
-def _finding(node: Any, failure_class: str, text: str, severity: str = "violation") -> Finding:
-    """Build one finding in the scanner's schema."""
-    return {
+def _finding(
+    node: Any, failure_class: str, text: str, severity: str = "violation", cwe: str | None = None
+) -> Finding:
+    """Build one finding in the scanner's schema.
+
+    `cwe` values are kept identical to the ones the regex and Python tiers
+    attach to the byte-identical finding texts, so deduplication can never
+    merge two findings that disagree about their weakness class.
+    """
+    finding: Finding = {
         "line": node.start_point[0] + 1,
         "class": failure_class,
         "finding": text,
         "severity": severity,
         "source": SOURCE,
     }
+    if cwe is not None:
+        finding["cwe"] = cwe
+    return finding
 
 
 def _unwrap_expression(statement: Any) -> Any:
@@ -309,12 +319,12 @@ def _classify_sole_statement(statement: Any, node: Any, language: str, code_byte
             values = _statements(values[0])
         nullish = _NULLISH_RETURN_TYPES.get(language, frozenset())
         if len(values) == 1 and values[0].type in nullish:
-            return _finding(node, CLASS_FRAMEWORK, TEXT_HARDCODED_RETURN)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_HARDCODED_RETURN, cwe="CWE-684")
         return None
 
     if inner.type == "throw_statement":
         if _NOT_IMPLEMENTED_RE.search(_node_text(inner, code_bytes)):
-            return _finding(node, CLASS_FRAMEWORK, TEXT_NOT_IMPLEMENTED)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_NOT_IMPLEMENTED, cwe="CWE-684")
         return None
 
     if language == "go" and inner.type == "call_expression":
@@ -324,13 +334,13 @@ def _classify_sole_statement(statement: Any, node: Any, language: str, code_byte
             and _node_text(function, code_bytes) == "panic"
             and _NOT_IMPLEMENTED_RE.search(_node_text(inner, code_bytes))
         ):
-            return _finding(node, CLASS_FRAMEWORK, TEXT_PANIC_STUB)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_PANIC_STUB, cwe="CWE-684")
         return None
 
     if language == "rust" and inner.type == "macro_invocation":
         macro = inner.child_by_field_name("macro")
         if macro is not None and _node_text(macro, code_bytes) in _RUST_STUB_MACROS:
-            return _finding(node, CLASS_FRAMEWORK, TEXT_RUST_MACRO)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_RUST_MACRO, cwe="CWE-684")
         return None
 
     return None
@@ -352,7 +362,7 @@ def _classify_function(node: Any, language: str, code_bytes: bytes) -> Finding |
         # Ruby methods have no body field when the body is empty; everywhere
         # else a missing body means declaration-only, which is legitimate.
         if language == "ruby" and name is not None:
-            return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_FUNCTION)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_FUNCTION, cwe="CWE-1071")
         return None
 
     if name is None:
@@ -361,7 +371,7 @@ def _classify_function(node: Any, language: str, code_bytes: bytes) -> Finding |
     statements = _statements(body)
     if len(statements) == 0:
         if language in _EMPTY_BODY_LANGUAGES:
-            return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_FUNCTION)
+            return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_FUNCTION, cwe="CWE-1071")
         return None
     if len(statements) == 1:
         return _classify_sole_statement(statements[0], node, language, code_bytes)
@@ -374,7 +384,7 @@ def _classify_catch(node: Any) -> Finding | None:
     if body is None:
         return None
     if len(_statements(body)) == 0:
-        return _finding(node, CLASS_CONFIDENCE, TEXT_EMPTY_CATCH)
+        return _finding(node, CLASS_CONFIDENCE, TEXT_EMPTY_CATCH, cwe="CWE-1069")
     return None
 
 
@@ -384,7 +394,7 @@ def _classify_loop(node: Any) -> Finding | None:
     if body is None:
         return None
     if len(_statements(body)) == 0:
-        return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_LOOP, severity="warning")
+        return _finding(node, CLASS_FRAMEWORK, TEXT_EMPTY_LOOP, severity="warning", cwe="CWE-1071")
     return None
 
 
@@ -408,7 +418,7 @@ def _classify_branches(node: Any, code_bytes: bytes) -> Finding | None:
     if consequence.type not in _BLOCK_TYPES or resolved.type not in _BLOCK_TYPES:
         return None
     if _node_text(consequence, code_bytes).strip() == _node_text(resolved, code_bytes).strip():
-        return _finding(node, CLASS_CONFIDENCE, TEXT_IDENTICAL_BRANCHES, severity="warning")
+        return _finding(node, CLASS_CONFIDENCE, TEXT_IDENTICAL_BRANCHES, severity="warning", cwe="CWE-1164")
     return None
 
 
@@ -449,6 +459,7 @@ def _metric_findings(name: str | None, function_node: Any, language: str, code_b
                 f"Function '{label}' has cyclomatic complexity {complexity} "
                 f"(limit {COMPLEXITY_LIMIT}) - decompose it",
                 severity="warning",
+                cwe="CWE-1121",
             )
         )
     length = function_node.end_point[0] - function_node.start_point[0] + 1
@@ -460,6 +471,7 @@ def _metric_findings(name: str | None, function_node: Any, language: str, code_b
                 f"Function '{label}' is {length} lines long "
                 f"(limit {LENGTH_LIMIT}) - single responsibility demands decomposition",
                 severity="warning",
+                cwe="CWE-1120",
             )
         )
     return findings

@@ -137,6 +137,100 @@ def _review_body(review: dict[str, Any], overflow: int) -> str:
     return "\n".join(lines)
 
 
+_SEVERITY_TO_SARIF_LEVEL = {"violation": "error", "warning": "warning"}
+
+_SARIF_SCHEMA_URI = (
+    "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json"
+)
+
+_INFORMATION_URI = "https://github.com/QuantmindSSI/CTO-MCP"
+
+
+def _sarif_rule_id(failure_class: str) -> str:
+    """Deterministic ruleId from a constitution failure class.
+
+    "Class 1 - Framework Generation" -> "persona.class-1-framework-generation".
+    Stable across runs so GitHub code scanning tracks findings over time.
+    """
+    slug = "".join(char if char.isalnum() else "-" for char in failure_class.lower())
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return "persona." + slug.strip("-")
+
+
+def to_sarif(review: dict[str, Any], tool_version: str) -> dict[str, Any]:
+    """Render a review as a SARIF 2.1.0 log for GitHub code scanning.
+
+    One run, one result per attributed finding (skipped files and
+    pre-existing debt contribute nothing - SARIF gates exactly what the
+    verdict gates). Rules are derived from the constitution failure
+    classes; CWE IDs travel as rule/result tags so security dashboards
+    can pivot on weakness class.
+    """
+    rules: dict[str, dict[str, Any]] = {}
+    results: list[dict[str, Any]] = []
+
+    for file_report in review["files"]:
+        if file_report["mode"].startswith("skipped-"):
+            continue
+        for finding in file_report["findings"]:
+            rule_id = _sarif_rule_id(finding["class"])
+            cwe = finding.get("cwe")
+            rule = rules.setdefault(
+                rule_id,
+                {
+                    "id": rule_id,
+                    "name": finding["class"],
+                    "shortDescription": {"text": finding["class"]},
+                    "helpUri": _INFORMATION_URI,
+                    "properties": {"tags": ["persona-constitution"]},
+                },
+            )
+            if cwe is not None and cwe not in rule["properties"]["tags"]:
+                rule["properties"]["tags"].append(cwe)
+
+            result: dict[str, Any] = {
+                "ruleId": rule_id,
+                "level": _SEVERITY_TO_SARIF_LEVEL[finding["severity"]],
+                "message": {"text": f"{finding['finding']} [{finding['source']}]"},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": file_report["path"]},
+                            "region": {"startLine": max(int(finding["line"]), 1)},
+                        }
+                    }
+                ],
+                "properties": {"class": finding["class"], "source": finding["source"]},
+            }
+            if cwe is not None:
+                result["properties"]["cwe"] = cwe
+            results.append(result)
+
+    ordered_rules = [rules[rule_id] for rule_id in sorted(rules)]
+    rule_index = {rule["id"]: index for index, rule in enumerate(ordered_rules)}
+    for result in results:
+        result["ruleIndex"] = rule_index[result["ruleId"]]
+
+    return {
+        "$schema": _SARIF_SCHEMA_URI,
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "persona-pr-review",
+                        "informationUri": _INFORMATION_URI,
+                        "version": tool_version,
+                        "rules": ordered_rules,
+                    }
+                },
+                "results": results,
+            }
+        ],
+    }
+
+
 def to_text(review: dict[str, Any]) -> str:
     """Plain-text report for terminals and logs."""
     lines = [f"verdict: {review['verdict']}", review["summary"], ""]

@@ -294,6 +294,7 @@ scanner can prove the absence of markers, not the presence of correctness.
 permissions:
   contents: read
   pull-requests: write
+  security-events: write         # only needed when sarif-file is set
 steps:
   - uses: actions/checkout@v5
   - uses: QuantmindSSI/CTO-MCP@main   # pin a tag/sha in production
@@ -301,11 +302,16 @@ steps:
       exclude: "vendor/*"        # appended to the repo's .persona-review.json
       require-tests: "warn"      # C-03; empty = use the repo's config
       fail-on-review: "false"
+      sarif-file: "persona-review.sarif"   # optional: findings in the Security tab
 ```
 
 Violations become `::error` annotations on the changed lines and a posted review that
 `REQUEST_CHANGES`; fork PRs are automatically downgraded to annotations-only so the token never
-serves untrusted code. This repository dogfoods the action on its own PRs
+serves untrusted code. With `sarif-file` set, the review is also uploaded to GitHub code
+scanning as SARIF 2.1.0 — findings appear in the repository's **Security** tab, tagged with
+their MITRE CWE IDs (CWE-546 suspicious comments, CWE-1071 empty bodies, CWE-1069 empty
+catches, CWE-684 contract-faking stubs, and the rest of the mapping documented in
+`scanner.py`). This repository dogfoods the action on its own PRs
 (`.github/workflows/pr-review.yml`).
 
 **4. opencode agent (factor 2)** — `.opencode/agent/pr-review.md` defines the agentic layer.

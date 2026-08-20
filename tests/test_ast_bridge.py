@@ -36,7 +36,7 @@ class TestConstantsStayAlignedWithScanner(unittest.TestCase):
         self.assertEqual(ast_bridge.CLASS_CONFIDENCE, scanner.CLASS_CONFIDENCE)
 
     def test_finding_texts_match_prose_rules(self):
-        prose_texts = {description for _, _, description, _, _ in scanner.PROSE_RULES}
+        prose_texts = {rule[2] for rule in scanner.PROSE_RULES}
         for text in (
             ast_bridge.TEXT_EMPTY_FUNCTION,
             ast_bridge.TEXT_HARDCODED_RETURN,

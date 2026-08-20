@@ -41,6 +41,15 @@ inputs:
       .persona-review.json, else warn".
     required: false
     default: ""
+  sarif-file:
+    description: >-
+      When set, also write the review as SARIF 2.1.0 to this path and upload
+      it to GitHub code scanning, so findings appear in the repository's
+      Security tab with CWE tags. Requires `security-events: write` in the
+      calling workflow's permissions. Skipped automatically for pull
+      requests from forks, whose tokens cannot upload scanning results.
+    required: false
+    default: ""
   install-ast-extra:
     description: Install the tree-sitter [ast] extra for full AST fidelity.
     required: false
@@ -78,6 +87,7 @@ runs:
         FAIL_ON_REVIEW: ${{ inputs.fail-on-review }}
         EXCLUDE_GLOBS: ${{ inputs.exclude }}
         REQUIRE_TESTS: ${{ inputs.require-tests }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
       run: |
         set -u
         if [ -z "${{ github.event.pull_request.number }}" ]; then
@@ -97,6 +107,9 @@ runs:
         if [ -n "$REQUIRE_TESTS" ]; then
           args+=(--require-tests "$REQUIRE_TESTS")
         fi
+        if [ -n "$SARIF_FILE" ]; then
+          args+=(--sarif-file "$SARIF_FILE")
+        fi
 
         # Comma-separated globs -> repeated --exclude flags.
         if [ -n "$EXCLUDE_GLOBS" ]; then
@@ -110,3 +123,12 @@ runs:
         fi
 
         persona-pr-review "${args[@]}"
+
+    # SHA-pinned like every other action dependency. Fork PRs are excluded:
+    # their read-only tokens cannot upload code-scanning results, and the
+    # annotations path above already carries the findings for them.
+    - name: Upload SARIF to code scanning
+      if: inputs.sarif-file != '' && github.event.pull_request.head.repo.fork != true
+      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

@@ -5,6 +5,40 @@ All notable changes to persona-constitution-mcp. The format follows
 semantic versioning. Each release's section is what the release workflow
 publishes as the release notes - a tag with no section here does not ship.
 
+## [3.5.0] - 2026-08-20
+
+The interoperability release: findings speak the industry's language.
+Every finding carries a MITRE CWE where a defensible mapping exists, and
+the review renders as SARIF 2.1.0 for GitHub code scanning - so the gate's
+output lands in the Security tab of every consuming repository, tagged by
+weakness class, instead of living only in annotations and logs.
+
+### Added
+
+- **CWE tagging across all four engines.** Deferral prose and markers are
+  CWE-546 (Suspicious Comment); empty function/loop bodies are CWE-1071
+  (Empty Code Block); empty catch/except handling is CWE-1069 (Empty
+  Exception Block); stubs that fake their contract (hardcoded returns,
+  not-implemented throws, panic()/todo!() stubs) are CWE-684 (Incorrect
+  Provision of Specified Functionality); unreachable code is CWE-561,
+  constant conditions are CWE-570/571 selected by actual polarity, and
+  the Po10 metrics are CWE-1121/1120. Engines attach identical IDs to
+  byte-identical finding texts, so deduplication can never merge findings
+  that disagree about their weakness class. Absence of `cwe` is a
+  statement - no honest mapping exists (mock/fake/passthrough classes) -
+  and tests pin both directions.
+- **SARIF 2.1.0 output.** `to_sarif()` renders a review with stable
+  ruleIds derived from the constitution failure classes, severity-mapped
+  levels, real line coordinates, and CWE tags on rules and results.
+  Skipped files and pre-existing debt contribute nothing: SARIF gates
+  exactly what the verdict gates.
+- **`--sarif-file PATH`** on the CLI (written before stdout output; an
+  unwritable path is an operational error, exit 3, not a crash) and a
+  **`sarif-file` input on the composite action**, which uploads to code
+  scanning via SHA-pinned codeql-action - skipped automatically for fork
+  PRs, whose tokens cannot upload. Dogfooded on this repository's own
+  PR gate.
+
 ## [3.4.0] - 2026-08-20
 
 The verification-depth release: the protocol boundary is conformance-
@@ -174,6 +208,7 @@ attested, and published from the same bytes.
 - Scanner accuracy benchmark with an environment-aware regression
   baseline (`tools/benchmark_scanner.py`).
 
+[3.5.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.1...v3.4.0
 [3.3.1]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.2.0...v3.3.0
