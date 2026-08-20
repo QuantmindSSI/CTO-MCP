@@ -41,15 +41,17 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from .._version import __version__
     from .config import REQUIRE_TESTS_MODES, load_config
     from .engine import MAX_FILE_BYTES, language_for_path, review_patch
     from .github_client import GitHubClient, GitHubError
-    from .report import to_annotations, to_github_review, to_text
+    from .report import to_annotations, to_github_review, to_sarif, to_text
 except ImportError:  # pragma: no cover - direct script execution
+    from persona_constitution._version import __version__
     from persona_constitution.review.config import REQUIRE_TESTS_MODES, load_config
     from persona_constitution.review.engine import MAX_FILE_BYTES, language_for_path, review_patch
     from persona_constitution.review.github_client import GitHubClient, GitHubError
-    from persona_constitution.review.report import to_annotations, to_github_review, to_text
+    from persona_constitution.review.report import to_annotations, to_github_review, to_sarif, to_text
 
 _PR_SPEC_RE = re.compile(r"^([\w.-]+)/([\w.-]+)#(\d+)$")
 
@@ -85,6 +87,15 @@ def _add_policy_and_output_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="emit the full review as JSON")
     parser.add_argument(
         "--annotate", action="store_true", help="emit GitHub Actions error/warning annotations"
+    )
+    parser.add_argument(
+        "--sarif-file",
+        metavar="PATH",
+        default=None,
+        help=(
+            "additionally write the review as SARIF 2.1.0 to PATH (for GitHub code "
+            "scanning upload); independent of the stdout format selectors"
+        ),
     )
     parser.add_argument("--post", action="store_true", help="post the review to the PR (--github mode only)")
     parser.add_argument("--fail-on-review", action="store_true", help="exit 1 when the verdict is REVIEW")
@@ -301,7 +312,14 @@ def _review_github_pr(
 
 
 def _emit(review: dict[str, Any], arguments: argparse.Namespace, posted: bool) -> None:
-    """Write the selected output format(s) to stdout."""
+    """Write the selected output format(s) to stdout, and SARIF to disk
+    when requested. The SARIF file is written first: if the disk write
+    fails, the caller sees an operational error rather than a green log
+    with a missing artifact."""
+    if arguments.sarif_file:
+        sarif_path = Path(arguments.sarif_file)
+        sarif_path.write_text(json.dumps(to_sarif(review, __version__), indent=2) + "\n", encoding="utf-8")
+        print(f"SARIF written to {sarif_path}", file=sys.stderr)
     if arguments.json:
         print(json.dumps(review, indent=2))
     elif arguments.annotate:
@@ -349,7 +367,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"persona-pr-review: {error}", file=sys.stderr)
         return EXIT_OPERATIONAL_ERROR
 
-    _emit(review, arguments, posted)
+    try:
+        _emit(review, arguments, posted)
+    except OSError as error:
+        # A SARIF path that cannot be written is an operational failure,
+        # not a crash: same contract as git/API/filesystem errors above.
+        print(f"persona-pr-review: {error}", file=sys.stderr)
+        return EXIT_OPERATIONAL_ERROR
 
     if review["verdict"] == "FAIL":
         return EXIT_GATE_FAILED

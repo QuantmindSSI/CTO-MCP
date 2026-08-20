@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "persona-constitution-mcp"
-version = "3.4.0"
+version = "3.5.0"
 description = "MCP server serving the Agentic Engineering Persona constitution: SWEBOK v4.0, NASA Power of 10, Zero Framework Tolerance."
 readme = "README.md"
 license = "MIT"

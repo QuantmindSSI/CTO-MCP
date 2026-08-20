@@ -61,15 +61,22 @@ _DECISION_NODES = (ast.If, ast.IfExp, ast.ExceptHandler, ast.Assert, ast.For, as
 _MATCH_NODE = getattr(ast, "Match", None)
 
 
-def _warning(line: int, failure_class: str, text: str) -> Finding:
-    """One finding dict in the scanner schema, always warning severity."""
-    return {
+def _warning(line: int, failure_class: str, text: str, cwe: str | None = None) -> Finding:
+    """One finding dict in the scanner schema, always warning severity.
+
+    `cwe` is attached only where a defensible MITRE CWE mapping exists;
+    decorating findings with approximate IDs would be worse than none.
+    """
+    finding: Finding = {
         "line": line,
         "class": failure_class,
         "finding": text,
         "severity": "warning",
         "source": "constitution-logic",
     }
+    if cwe is not None:
+        finding["cwe"] = cwe
+    return finding
 
 
 def _iter_function_scope(function_node: FunctionNode) -> Iterator[ast.AST]:
@@ -109,6 +116,7 @@ def _metric_findings(function_node: FunctionNode) -> list[Finding]:
                 CLASS_PO10_COMPLEXITY,
                 f"Function '{function_node.name}' has cyclomatic complexity {complexity} "
                 f"(limit {COMPLEXITY_LIMIT}) - decompose it",
+                cwe="CWE-1121",  # Excessive McCabe Cyclomatic Complexity
             )
         )
     end_line = getattr(function_node, "end_lineno", None)
@@ -121,6 +129,9 @@ def _metric_findings(function_node: FunctionNode) -> list[Finding]:
                     CLASS_PO10_LENGTH,
                     f"Function '{function_node.name}' is {length} lines long "
                     f"(limit {LENGTH_LIMIT}) - single responsibility demands decomposition",
+                    # No function-length-specific CWE exists; 1120 is the
+                    # general excessive-complexity weakness it instantiates.
+                    cwe="CWE-1120",
                 )
             )
     return findings
@@ -135,14 +146,17 @@ def _branch_findings(node: ast.If) -> list[Finding]:
     """Identical-arm and constant-condition warnings for one If node."""
     findings: list[Finding] = []
     if isinstance(node.test, ast.Constant) and isinstance(node.test.value, (bool, int)):
-        findings.append(_warning(node.lineno, CLASS_CONFIDENCE, TEXT_CONSTANT_CONDITION))
+        # Polarity is known here, so the precise CWE variant is used:
+        # always-true (571) versus always-false (570).
+        polarity_cwe = "CWE-571" if node.test.value else "CWE-570"
+        findings.append(_warning(node.lineno, CLASS_CONFIDENCE, TEXT_CONSTANT_CONDITION, cwe=polarity_cwe))
     orelse = node.orelse
     is_elif = len(orelse) == 1 and isinstance(orelse[0], ast.If)
     if orelse and not is_elif:
         body_dump = [ast.dump(statement) for statement in node.body]
         else_dump = [ast.dump(statement) for statement in orelse]
         if body_dump == else_dump:
-            findings.append(_warning(node.lineno, CLASS_CONFIDENCE, TEXT_IDENTICAL_BRANCHES))
+            findings.append(_warning(node.lineno, CLASS_CONFIDENCE, TEXT_IDENTICAL_BRANCHES, cwe="CWE-1164"))
     return findings
 
 
@@ -155,7 +169,9 @@ def _unreachable_findings(node: ast.AST) -> list[Finding]:
             continue
         for index, statement in enumerate(block[:-1]):
             if isinstance(statement, _TERMINAL_NODES):
-                findings.append(_warning(block[index + 1].lineno, CLASS_CONFIDENCE, TEXT_UNREACHABLE))
+                findings.append(
+                    _warning(block[index + 1].lineno, CLASS_CONFIDENCE, TEXT_UNREACHABLE, cwe="CWE-561")
+                )
                 break
     return findings
 
@@ -181,7 +197,7 @@ def python_logic_findings(tree: ast.Module) -> list[Finding]:
         if isinstance(node, _FUNCTION_NODES):
             findings.extend(_metric_findings(node))
         if isinstance(node, _LOOP_NODES) and _body_is_only_pass(node.body):
-            findings.append(_warning(node.lineno, CLASS_FRAMEWORK, TEXT_EMPTY_LOOP))
+            findings.append(_warning(node.lineno, CLASS_FRAMEWORK, TEXT_EMPTY_LOOP, cwe="CWE-1071"))
         if isinstance(node, ast.If):
             findings.extend(_branch_findings(node))
         findings.extend(_unreachable_findings(node))
