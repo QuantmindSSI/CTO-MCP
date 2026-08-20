@@ -16,12 +16,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to full commit SHAs, not tags: a tag is a mutable
+# pointer under someone else's control, a SHA is content-addressed. The
+# trailing comment records the tag each SHA was resolved from; Dependabot
+# keeps them current.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install ruff at the pinned version
@@ -43,8 +48,8 @@ jobs:
         # the xast engine must hit its higher benchmark baseline.
         extras: ["", "[ast]"]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install the package and its dependencies
@@ -53,8 +58,56 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Scanner accuracy benchmark
         # Exits non-zero if the union detection rate regresses below the
-        # baseline for this configuration (33/33 with [ast], 28/33 without).
+        # baseline for this configuration (37/37 with [ast], 30/37 without).
         run: python tools/benchmark_scanner.py
+
+  # The OS matrix the README implies (developer laptops) is tested, not
+  # assumed. macOS is a required check. Windows is informational until it
+  # has a green history: continue-on-error surfaces real signal without
+  # letting an unproven runner hold main hostage - flip it to required once
+  # it has been green for a few weeks.
+  os-compat:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            informational: false
+          - os: windows-latest
+            informational: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.informational }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the package with the ast extra
+        run: pip install --disable-pip-version-check ".[ast]"
+      - name: Run the test suite
+        run: python -m unittest discover -s tests -v
+      - name: Scanner accuracy benchmark
+        run: python tools/benchmark_scanner.py
+
+  coverage:
+    # A measurement with a ratchet, not a vanity target: fail-under only
+    # ever rises (raise it when the measured number rises; never lower it).
+    # Measured 87% on first-party code at the time the gate was added; the
+    # floor sits one point under to absorb line-attribution variance across
+    # interpreter releases. The scan-budget wall-clock tests self-skip under
+    # the tracer, so this job measures correctness paths, not stopwatches.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the package, the ast extra, and coverage
+        run: pip install --disable-pip-version-check ".[ast]" coverage
+      - name: Run the suite under coverage
+        run: python -m coverage run --source=persona_constitution -m unittest discover -s tests
+      - name: Enforce the coverage floor
+        run: python -m coverage report --fail-under=86
 
   packaging:
     # Guards the defect where the wheel shipped without CONSTITUTION.md and the
@@ -62,8 +115,8 @@ jobs:
     # because in a checkout the data is found via the source tree.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Build the wheel

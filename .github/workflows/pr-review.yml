@@ -21,7 +21,7 @@ jobs:
   constitution-gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Run the Zero-Framework-Tolerance gate
         # Policy (exclusions, C-03 test requirement, business-logic hints)
         # comes from .persona-review.json so the pre-commit staged gate, this

@@ -53,7 +53,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-python@v6
+    # SHA-pinned: consumers of this action inherit this dependency, so a
+    # mutable tag here would be a supply-chain hole in their pipelines too.
+    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
         python-version: ${{ inputs.python-version }}
 

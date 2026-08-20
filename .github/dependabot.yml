@@ -1,0 +1,22 @@
+# Keeps the SHA-pinned actions and the pinned Python dev/ast dependencies
+# current. Pinning without an update feed is how pins rot into liabilities;
+# this is the feed. Grouped weekly so updates arrive as one reviewable PR
+# per ecosystem, which then passes through the same CI and constitution
+# gate as any other change.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-deps:
+        patterns: ["*"]
