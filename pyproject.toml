@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "persona-constitution-mcp"
-version = "3.3.1"
+version = "3.4.0"
 description = "MCP server serving the Agentic Engineering Persona constitution: SWEBOK v4.0, NASA Power of 10, Zero Framework Tolerance."
 readme = "README.md"
 license = "MIT"
@@ -31,7 +31,7 @@ classifiers = [
 [project.optional-dependencies]
 # Pinned exactly: an unpinned linter turns an upstream release into a red build
 # on a commit that changed nothing. Bump deliberately.
-dev = ["ruff==0.16.2", "mypy==1.19.1"]
+dev = ["ruff==0.16.2", "mypy==1.19.1", "mutmut==3.3.1", "pytest==8.4.2"]
 # Optional tree-sitter tier for the vendored CodebaseCSI ASTParser. Without it
 # the scanner still runs: Python uses the stdlib ast engine and other languages
 # fall back to the constitution's structural regex rules.
@@ -130,3 +130,23 @@ ignore = [
 "tests/*" = ["ARG002", "B011"]
 # The benchmark corpus is intentionally full of stub code as test data.
 "tools/benchmark_scanner.py" = ["ARG001", "ARG002"]
+
+[tool.mutmut]
+# Mutation testing of the detector core: the product IS these rules, so
+# their tests must prove detection, not merely execution. Run nightly
+# (mutation.yml), not per-PR - hundreds of mutants times the suite is a
+# budget, not a gate. tests/conftest.py scopes out the tests that assert
+# real-repository properties (release integrity, wall-clock budgets,
+# subprocess transport), which are meaningless inside the mutants/ sandbox.
+# Baseline measured at introduction: logic_rules.py 107/155 killed (69%).
+paths_to_mutate = [
+  "persona_constitution/logic_rules.py",
+  "persona_constitution/scanner.py",
+  "persona_constitution/ast_bridge.py",
+  "persona_constitution/review/diff.py",
+  "persona_constitution/review/engine.py",
+]
+tests_dir = ["tests/"]
+# The sandbox copies only Python sources by default; these are the data
+# files the suite legitimately reads.
+also_copy = ["CHANGELOG.md", "pyproject.toml", "tools/", "persona_constitution/data/", ".persona-review.json"]

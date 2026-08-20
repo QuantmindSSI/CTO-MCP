@@ -26,3 +26,7 @@ htmlcov/
 .idea/
 .vscode/
 *.swp
+
+# mutmut mutation-testing sandbox and cache
+mutants/
+.mutmut-cache

@@ -5,6 +5,60 @@ All notable changes to persona-constitution-mcp. The format follows
 semantic versioning. Each release's section is what the release workflow
 publishes as the release notes - a tag with no section here does not ship.
 
+## [3.4.0] - 2026-08-20
+
+The verification-depth release: the protocol boundary is conformance-
+tested and fuzzed (and two spec deviations it found are fixed), the
+entire first-party package is typed under strict mypy, the detector core
+is mutation-tested nightly, and every release now carries the scanner
+accuracy its own build measured.
+
+### Fixed
+
+- **Malformed id-less frames were silenced.** JSON-RPC 2.0's own examples
+  answer `{"jsonrpc": "2.0", "method": 1}` with an id-null -32600; an
+  invalid object cannot be trusted to be a notification, because the
+  missing id may itself be the malformation. Silence is now reserved for
+  well-formed notifications exactly.
+- **notifications/\* with an id attached was silenced.** Anything
+  carrying an id is a request and must be answered; unknown methods now
+  uniformly produce METHOD_NOT_FOUND and only genuinely id-less frames
+  are discarded. Found, like the above, by the new fuzz suite's first run.
+- `handle_tools_call` answered an unhashable tool name with
+  INTERNAL_ERROR (it crashed inside `dict.get`); a caller mistake is now
+  INVALID_PARAMS. Forced by the type checker during strict-mypy adoption.
+
+### Added
+
+- **Protocol conformance and fuzz suite**
+  (`tests/test_protocol_conformance.py`): pins the initialize,
+  tools/list, and tools/call shapes; 600 seeded mutated frames against
+  `dispatch()` under three invariants (never raises; exactly one response
+  per request, id echoed, exactly one of result/error; silence for
+  well-formed notifications); byte-level garbage against the stdio loop
+  proving the transport survives and stdout stays pure JSON frames.
+- **Debug diagnostics**: `--debug` flag or `PERSONA_CONSTITUTION_DEBUG`
+  env enables one stderr line per frame - method, tool, frame/response
+  sizes, wall-clock cost. Sizes only, never payload content; a test pins
+  that a scanned secret cannot appear in the diagnostics.
+- **Strict typing, gated**: every first-party module fully annotated,
+  `mypy --strict` clean (3.9 target; vendored codebase_csi outside the
+  regime with its symbols guarded at explicit boundaries), pinned mypy
+  running as its own CI job. GitHub API responses are now shape-checked
+  at the client boundary instead of trusted.
+- **Nightly mutation testing** (`mutation.yml` + `[tool.mutmut]`):
+  mutmut over the detector core (scanner, logic rules, ast bridge, diff
+  parser, review engine), driving the existing unittest suite through
+  pytest. Introduction baseline on logic_rules.py: 107/155 mutants
+  killed (69%); survivors are the enumerated test gaps to close.
+  `tests/conftest.py` scopes real-repository assertions (release
+  integrity, wall-clock budgets, subprocess transport) out of the
+  mutation sandbox where they are meaningless.
+- **Measured accuracy in release notes**: the release build's benchmark
+  summary (corpus size, per-tier and union detection rates) is appended
+  to the GitHub Release notes and attached as an artifact - the rules
+  are the product, so the number ships with it.
+
 ## [3.3.1] - 2026-08-20
 
 ### Fixed
@@ -120,6 +174,7 @@ attested, and published from the same bytes.
 - Scanner accuracy benchmark with an environment-aware regression
   baseline (`tools/benchmark_scanner.py`).
 
+[3.4.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.1...v3.4.0
 [3.3.1]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/4d43eb0...v3.2.0

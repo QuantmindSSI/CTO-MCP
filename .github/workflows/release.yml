@@ -39,7 +39,11 @@ jobs:
         run: |
           pip install --disable-pip-version-check ".[ast]"
           python -m unittest discover -s tests
-          python tools/benchmark_scanner.py
+          # The accuracy this build actually measured travels with the
+          # release: rules are the product, so the number is release-notes
+          # material, not just a private gate.
+          python tools/benchmark_scanner.py | tee /tmp/benchmark-full.txt
+          grep -E "corpus|prose|union|Union" /tmp/benchmark-full.txt > benchmark-summary.txt
 
       - name: Build sdist and wheel
         run: |
@@ -73,6 +77,7 @@ jobs:
         run: |
           pip install --disable-pip-version-check "cyclonedx-bom==7.3.1"
           cyclonedx-py environment --output-format json --output-file dist/sbom.cdx.json
+          cp benchmark-summary.txt dist/benchmark-summary.txt
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -112,8 +117,17 @@ jobs:
           match = re.search(pattern, text, re.MULTILINE | re.DOTALL)
           if match is None:
               sys.exit(f"CHANGELOG.md has no section for {version}; releases without notes do not ship")
-          Path("release-notes.md").write_text(match.group(0).strip() + "\n", encoding="utf-8")
-          print(match.group(0).strip())
+          notes = match.group(0).strip() + "\n"
+          summary = Path("dist/benchmark-summary.txt")
+          if not summary.is_file():
+              sys.exit("dist/benchmark-summary.txt missing; the build job must produce it")
+          notes += (
+              "\n### Scanner accuracy measured by this release build\n\n```\n"
+              + summary.read_text(encoding="utf-8").strip()
+              + "\n```\n"
+          )
+          Path("release-notes.md").write_text(notes, encoding="utf-8")
+          print(notes)
           PY
 
       - name: Create the GitHub Release with the attested artifacts
@@ -140,5 +154,5 @@ jobs:
           name: dist
           path: dist/
       - name: Remove non-distribution files before upload
-        run: rm -f dist/sbom.cdx.json
+        run: rm -f dist/sbom.cdx.json dist/benchmark-summary.txt
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
