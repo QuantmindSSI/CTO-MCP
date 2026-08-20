@@ -28,7 +28,16 @@ Nested function bodies are excluded from the enclosing function's count and
 measured separately.
 """
 
+from __future__ import annotations
+
 import ast
+from collections.abc import Iterator
+from typing import Any, Union
+
+# One finding in the scanner's JSON schema (line/class/finding/severity/source).
+Finding = dict[str, Any]
+# The two def-statement node shapes; 3.9 is the floor, so no ast.Match here.
+FunctionNode = Union[ast.FunctionDef, ast.AsyncFunctionDef]
 
 COMPLEXITY_LIMIT = 10
 LENGTH_LIMIT = 50
@@ -52,7 +61,7 @@ _DECISION_NODES = (ast.If, ast.IfExp, ast.ExceptHandler, ast.Assert, ast.For, as
 _MATCH_NODE = getattr(ast, "Match", None)
 
 
-def _warning(line, failure_class, text):
+def _warning(line: int, failure_class: str, text: str) -> Finding:
     """One finding dict in the scanner schema, always warning severity."""
     return {
         "line": line,
@@ -63,7 +72,7 @@ def _warning(line, failure_class, text):
     }
 
 
-def _iter_function_scope(function_node):
+def _iter_function_scope(function_node: FunctionNode) -> Iterator[ast.AST]:
     """Yield nodes of one function, not descending into nested functions."""
     stack = list(ast.iter_child_nodes(function_node))
     while stack:
@@ -74,7 +83,7 @@ def _iter_function_scope(function_node):
         stack.extend(ast.iter_child_nodes(node))
 
 
-def _complexity(function_node):
+def _complexity(function_node: FunctionNode) -> int:
     """McCabe cyclomatic complexity of one function scope."""
     score = 1
     for node in _iter_function_scope(function_node):
@@ -85,13 +94,13 @@ def _complexity(function_node):
         elif isinstance(node, ast.comprehension):
             score += 1 + len(node.ifs)
         elif _MATCH_NODE is not None and isinstance(node, _MATCH_NODE):
-            score += len(node.cases)
+            score += len(getattr(node, "cases", []))
     return score
 
 
-def _metric_findings(function_node):
+def _metric_findings(function_node: FunctionNode) -> list[Finding]:
     """Po10 Rule 1 and Rule 4 warnings for one function."""
-    findings = []
+    findings: list[Finding] = []
     complexity = _complexity(function_node)
     if complexity > COMPLEXITY_LIMIT:
         findings.append(
@@ -117,14 +126,14 @@ def _metric_findings(function_node):
     return findings
 
 
-def _body_is_only_pass(body):
+def _body_is_only_pass(body: list[ast.stmt]) -> bool:
     """True when every statement in a body list is `pass`."""
     return bool(body) and all(isinstance(statement, ast.Pass) for statement in body)
 
 
-def _branch_findings(node):
+def _branch_findings(node: ast.If) -> list[Finding]:
     """Identical-arm and constant-condition warnings for one If node."""
-    findings = []
+    findings: list[Finding] = []
     if isinstance(node.test, ast.Constant) and isinstance(node.test.value, (bool, int)):
         findings.append(_warning(node.lineno, CLASS_CONFIDENCE, TEXT_CONSTANT_CONDITION))
     orelse = node.orelse
@@ -137,9 +146,9 @@ def _branch_findings(node):
     return findings
 
 
-def _unreachable_findings(node):
+def _unreachable_findings(node: ast.AST) -> list[Finding]:
     """Warnings for statements after a terminal statement in any block field."""
-    findings = []
+    findings: list[Finding] = []
     for field in ("body", "orelse", "finalbody"):
         block = getattr(node, field, None)
         if not isinstance(block, list):
@@ -151,7 +160,7 @@ def _unreachable_findings(node):
     return findings
 
 
-def python_logic_findings(tree):
+def python_logic_findings(tree: ast.Module) -> list[Finding]:
     """Deep logic warnings for a parsed Python module.
 
     Args:
@@ -167,7 +176,7 @@ def python_logic_findings(tree):
     """
     assert isinstance(tree, ast.Module), "python_logic_findings requires a parsed ast.Module"
 
-    findings = []
+    findings: list[Finding] = []
     for node in ast.walk(tree):
         if isinstance(node, _FUNCTION_NODES):
             findings.extend(_metric_findings(node))

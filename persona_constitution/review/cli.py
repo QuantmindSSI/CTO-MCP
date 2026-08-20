@@ -28,13 +28,17 @@ Exit codes: 0 verdict PASS (or REVIEW without fail-on-review),
 3 operational error (git/API/filesystem/config failure).
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import re
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 try:
     from .config import REQUIRE_TESTS_MODES, load_config
@@ -54,7 +58,7 @@ EXIT_GATE_FAILED = 1
 EXIT_OPERATIONAL_ERROR = 3
 
 
-def _add_source_arguments(parser):
+def _add_source_arguments(parser: argparse.ArgumentParser) -> None:
     """The mutually exclusive input modes."""
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--diff", metavar="PATH", help="unified diff file, or '-' for stdin")
@@ -70,7 +74,7 @@ def _add_source_arguments(parser):
     )
 
 
-def _add_policy_and_output_arguments(parser):
+def _add_policy_and_output_arguments(parser: argparse.ArgumentParser) -> None:
     """Policy overrides and output selectors."""
     parser.add_argument(
         "--root",
@@ -108,7 +112,7 @@ def _add_policy_and_output_arguments(parser):
     )
 
 
-def build_parser():
+def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser (kept separate for testability)."""
     parser = argparse.ArgumentParser(
         prog="persona-pr-review",
@@ -119,23 +123,23 @@ def build_parser():
     return parser
 
 
-def _read_diff_argument(diff_argument):
+def _read_diff_argument(diff_argument: str) -> str:
     """Load diff text from a file path or stdin ('-')."""
     if diff_argument == "-":
         return sys.stdin.read()
     return Path(diff_argument).read_text(encoding="utf-8", errors="replace")
 
 
-def _run_git_diff(range_expression, root):
+def _run_git_diff(range_expression: str, root: str) -> str:
     """Produce diff text via git; raises RuntimeError with stderr on failure."""
     return _git_output(["diff", "--no-color", "--find-renames", range_expression], root)
 
 
-def _contents_from_worktree(diff_text, root):
+def _contents_from_worktree(diff_text: str, root: str) -> dict[str, str]:
     """Resolve full new-version contents for changed code files from disk."""
     from .diff import parse_unified_diff  # local import avoids cycle at module load
 
-    contents = {}
+    contents: dict[str, str] = {}
     root_path = Path(root)
     for file_diff in parse_unified_diff(diff_text):
         if file_diff.status == "deleted" or file_diff.is_binary:
@@ -151,7 +155,7 @@ def _contents_from_worktree(diff_text, root):
     return contents
 
 
-def _git_output(arguments, root, timeout=120):
+def _git_output(arguments: list[str], root: str, timeout: int = 120) -> str:
     """Run one git command; raises RuntimeError with stderr on failure."""
     completed = subprocess.run(
         ["git", *arguments], cwd=root, capture_output=True, text=True, timeout=timeout, check=False
@@ -161,7 +165,7 @@ def _git_output(arguments, root, timeout=120):
     return completed.stdout
 
 
-def _contents_from_index(diff_text, root):
+def _contents_from_index(diff_text: str, root: str) -> dict[str, str]:
     """Resolve staged (index) contents for changed code files.
 
     `git show :0:path` reads stage 0 of the index - exactly the bytes that
@@ -171,7 +175,7 @@ def _contents_from_index(diff_text, root):
     """
     from .diff import parse_unified_diff  # local import avoids cycle at module load
 
-    contents = {}
+    contents: dict[str, str] = {}
     for file_diff in parse_unified_diff(diff_text):
         if file_diff.status == "deleted" or file_diff.is_binary:
             continue
@@ -209,7 +213,7 @@ exit 1
 """
 
 
-def _install_hook(root, force):
+def _install_hook(root: str, force: bool) -> Path:
     """Install the pre-commit staged gate; returns the hook path.
 
     Refuses to overwrite a hook this tool did not write unless force is set -
@@ -235,12 +239,12 @@ def _install_hook(root, force):
     return hook_path
 
 
-def _github_token():
+def _github_token() -> str:
     """Token from the conventional environment variables."""
     return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 
 
-def _resolve_policy(arguments):
+def _resolve_policy(arguments: argparse.Namespace) -> tuple[dict[str, Any], bool]:
     """Merge .persona-review.json with command-line overrides.
 
     Returns (engine_kwargs, fail_on_review). Raises ValueError on a malformed
@@ -256,7 +260,9 @@ def _resolve_policy(arguments):
     return engine_kwargs, (arguments.fail_on_review or config["fail_on_review"])
 
 
-def _review_github_pr(spec, post, max_comments, engine_kwargs):
+def _review_github_pr(
+    spec: str, post: bool, max_comments: int, engine_kwargs: dict[str, Any]
+) -> tuple[dict[str, Any], bool]:
     """Fetch, review, and optionally post. Returns (review, posted: bool)."""
     match = _PR_SPEC_RE.match(spec)
     if match is None:
@@ -274,7 +280,7 @@ def _review_github_pr(spec, post, max_comments, engine_kwargs):
 
     from .diff import parse_unified_diff  # local import avoids cycle at module load
 
-    contents = {}
+    contents: dict[str, str] = {}
     for file_diff in parse_unified_diff(diff_text):
         if file_diff.status == "deleted" or file_diff.is_binary:
             continue
@@ -294,7 +300,7 @@ def _review_github_pr(spec, post, max_comments, engine_kwargs):
     return review, posted
 
 
-def _emit(review, arguments, posted):
+def _emit(review: dict[str, Any], arguments: argparse.Namespace, posted: bool) -> None:
     """Write the selected output format(s) to stdout."""
     if arguments.json:
         print(json.dumps(review, indent=2))
@@ -307,7 +313,7 @@ def _emit(review, arguments, posted):
         print("review posted to GitHub", file=sys.stderr)
 
 
-def _local_review(arguments, engine_kwargs):
+def _local_review(arguments: argparse.Namespace, engine_kwargs: dict[str, Any]) -> dict[str, Any]:
     """Run the diff/git/staged modes against local state."""
     if arguments.post:
         raise RuntimeError("--post requires --github mode")
@@ -323,7 +329,7 @@ def _local_review(arguments, engine_kwargs):
     return review_patch(diff_text, file_contents=contents, **engine_kwargs)
 
 
-def main(argv=None):
+def main(argv: Sequence[str] | None = None) -> int:
     """Entry point. Returns the process exit code."""
     arguments = build_parser().parse_args(argv)
     posted = False

@@ -24,14 +24,17 @@ silently degrading the gate - a typo in "require_tests" must not disable
 test enforcement.
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import Any, Callable
 
 CONFIG_FILENAME = ".persona-review.json"
 
 REQUIRE_TESTS_MODES = ("off", "warn", "fail")
 
-_DEFAULTS = {
+_DEFAULTS: dict[str, Any] = {
     "exclude": [],
     "fail_on_review": False,
     "require_tests": "warn",
@@ -41,25 +44,25 @@ _DEFAULTS = {
 }
 
 
-def default_config():
+def default_config() -> dict[str, Any]:
     """A fresh copy of the default policy."""
     return {key: (list(value) if isinstance(value, list) else value) for key, value in _DEFAULTS.items()}
 
 
-def _check_string_list(value):
+def _check_string_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
-def _check_require_tests(value):
+def _check_require_tests(value: Any) -> bool:
     return value in REQUIRE_TESTS_MODES
 
 
-def _check_non_negative_int(value):
+def _check_non_negative_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 # key -> (predicate, requirement text used in the error message).
-_VALIDATORS = {
+_VALIDATORS: dict[str, tuple[Callable[[Any], bool], str]] = {
     "exclude": (_check_string_list, "an array of strings"),
     "test_globs": (_check_string_list, "an array of strings"),
     "fail_on_review": (lambda value: isinstance(value, bool), "a boolean"),
@@ -69,7 +72,7 @@ _VALIDATORS = {
 }
 
 
-def _validate(raw):
+def _validate(raw: Any) -> dict[str, Any]:
     """Validate raw JSON against the schema; returns a complete config dict."""
     if not isinstance(raw, dict):
         raise ValueError(f"{CONFIG_FILENAME}: top level must be a JSON object")
@@ -87,7 +90,7 @@ def _validate(raw):
     return config
 
 
-def load_config(root):
+def load_config(root: str | Path) -> dict[str, Any]:
     """Load the policy for a repository root.
 
     Args:

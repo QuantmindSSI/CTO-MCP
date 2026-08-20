@@ -9,6 +9,10 @@ presence of correctness, so approval authority stays with humans and the
 agent layer's judgement.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 # GitHub rejects review payloads with excessive comment counts and truncates
 # noisy reviews into uselessness; cap and summarise the overflow instead.
 MAX_INLINE_COMMENTS = 50
@@ -16,23 +20,23 @@ MAX_INLINE_COMMENTS = 50
 _SEVERITY_TO_ANNOTATION = {"violation": "error", "warning": "warning"}
 
 
-def _escape_annotation_message(text):
+def _escape_annotation_message(text: str) -> str:
     """Escape message text per the Actions workflow-command grammar."""
     return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
-def _escape_annotation_property(text):
+def _escape_annotation_property(text: str) -> str:
     """Escape property values (file, title) per the Actions grammar."""
     return _escape_annotation_message(text).replace(":", "%3A").replace(",", "%2C")
 
 
-def to_annotations(review):
+def to_annotations(review: dict[str, Any]) -> list[str]:
     """Render a review as GitHub Actions workflow commands, one per finding.
 
     Returns a list of `::error`/`::warning` command strings with file and
     line coordinates, followed by a `::notice` carrying the overall verdict.
     """
-    commands = []
+    commands: list[str] = []
     for file_report in review["files"]:
         for finding in file_report["findings"]:
             level = _SEVERITY_TO_ANNOTATION[finding["severity"]]
@@ -49,7 +53,7 @@ def to_annotations(review):
     return commands
 
 
-def _comment_body(finding):
+def _comment_body(finding: dict[str, Any]) -> str:
     """One inline review comment for one finding."""
     severity = finding["severity"].upper()
     return (
@@ -60,7 +64,9 @@ def _comment_body(finding):
     )
 
 
-def to_github_review(review, commit_sha, max_comments=MAX_INLINE_COMMENTS):
+def to_github_review(
+    review: dict[str, Any], commit_sha: str, max_comments: int = MAX_INLINE_COMMENTS
+) -> dict[str, Any]:
     """Build the payload for POST /repos/{owner}/{repo}/pulls/{n}/reviews.
 
     Args:
@@ -75,7 +81,7 @@ def to_github_review(review, commit_sha, max_comments=MAX_INLINE_COMMENTS):
         otherwise. Never APPROVE, by design.
     """
     assert commit_sha, "commit_sha is required to anchor review comments"
-    comments = []
+    comments: list[dict[str, Any]] = []
     overflow = 0
     for file_report in review["files"]:
         for finding in file_report["findings"]:
@@ -99,7 +105,7 @@ def to_github_review(review, commit_sha, max_comments=MAX_INLINE_COMMENTS):
     }
 
 
-def _review_body(review, overflow):
+def _review_body(review: dict[str, Any], overflow: int) -> str:
     """The consolidated review body posted alongside inline comments."""
     totals = review["totals"]
     lines = [
@@ -131,7 +137,7 @@ def _review_body(review, overflow):
     return "\n".join(lines)
 
 
-def to_text(review):
+def to_text(review: dict[str, Any]) -> str:
     """Plain-text report for terminals and logs."""
     lines = [f"verdict: {review['verdict']}", review["summary"], ""]
     for file_report in review["files"]:

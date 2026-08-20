@@ -31,7 +31,7 @@ classifiers = [
 [project.optional-dependencies]
 # Pinned exactly: an unpinned linter turns an upstream release into a red build
 # on a commit that changed nothing. Bump deliberately.
-dev = ["ruff==0.16.2"]
+dev = ["ruff==0.16.2", "mypy==1.19.1"]
 # Optional tree-sitter tier for the vendored CodebaseCSI ASTParser. Without it
 # the scanner still runs: Python uses the stdlib ast engine and other languages
 # fall back to the constitution's structural regex rules.
@@ -77,6 +77,23 @@ include = ["persona_constitution*", "codebase_csi*"]
 persona_constitution = ["data/*.md"]
 # The provenance ledger travels with the vendored code.
 codebase_csi = ["VENDORED.md"]
+
+[tool.mypy]
+# Strict on the shipped package; the version is the requires-python floor so
+# typing that only works on newer interpreters fails here, not at install.
+python_version = "3.9"
+strict = true
+files = ["persona_constitution"]
+# Warn on anything strict doesn't already cover that we still care about.
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# Vendored third-party code, kept in upstream (untyped) style for clean
+# syncs - the same boundary the lint regime draws. Its symbols enter the
+# first-party modules as Any, which strict mode tolerates at call sites.
+module = "codebase_csi.*"
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.ruff]
 # 3.9 is the floor declared in requires-python; lint against it so syntax that

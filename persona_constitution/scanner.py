@@ -40,10 +40,14 @@ The scanner is a necessary but not sufficient check. It cannot prove
 executability, correctness, or dependency honesty; gates G1-G5 still apply.
 """
 
+from __future__ import annotations
+
 import ast
 import io
 import re
 import tokenize
+from re import Pattern
+from typing import Any
 
 from codebase_csi.analyzers.mock_detector import MockCodeDetector
 
@@ -63,6 +67,12 @@ try:
 except ImportError:  # pragma: no cover - direct module execution
     from persona_constitution.ast_bridge import xast_findings
     from persona_constitution.logic_rules import python_logic_findings
+
+# One finding in the scanner's JSON schema; one prose rule entry:
+# (compiled pattern, failure class, message, severity, category).
+Finding = dict[str, Any]
+Span = tuple[int, int]
+ProseRule = tuple["Pattern[str]", str, str, str, str]
 
 # Constitution failure classes.
 CLASS_FRAMEWORK = "Class 1 - Framework Generation"
@@ -94,7 +104,7 @@ _CSI_CLASS_BY_PREFIX = (
 _SUPPRESSIBLE_IN_STRINGS = frozenset({"marker", "prose"})
 
 
-def _csi_failure_class(pattern_type):
+def _csi_failure_class(pattern_type: str | None) -> str:
     """Map a CodebaseCSI pattern_type onto a Constitution failure class."""
     lowered = (pattern_type or "").lower()
     for prefix, failure_class in _CSI_CLASS_BY_PREFIX:
@@ -103,7 +113,7 @@ def _csi_failure_class(pattern_type):
     return CLASS_FRAMEWORK
 
 
-def _csi_severity(severity, confidence):
+def _csi_severity(severity: str | None, confidence: float | None) -> str:
     """Collapse CodebaseCSI's 4-level severity onto violation/warning.
 
     CRITICAL and HIGH are unambiguous. MEDIUM is promoted to a violation only
@@ -125,7 +135,7 @@ def _csi_severity(severity, confidence):
 # Each rule: (compiled regex, failure class, description, severity, kind).
 # `kind` drives string-literal suppression: "prose" and "marker" rules are
 # suppressed inside data strings, "structure" rules are always evaluated.
-PROSE_RULES = [
+PROSE_RULES: list[ProseRule] = [
     # -- Class 2: Scaffold Deception -------------------------------------
     (
         re.compile(r"rest\s+of\s+the\s+(?:implementation|code|file|logic|method|function)", re.IGNORECASE),
@@ -321,7 +331,7 @@ PROSE_RULES = [
 # --------------------------------------------------------------------------
 
 
-def _line_offsets(code):
+def _line_offsets(code: str) -> list[int]:
     """Return a list mapping 1-based line number to its start char offset."""
     offsets = [0, 0]
     for line in code.splitlines(keepends=True):
@@ -329,7 +339,7 @@ def _line_offsets(code):
     return offsets
 
 
-def _python_data_string_spans(code):
+def _python_data_string_spans(code: str) -> list[Span]:
     """Return char spans of Python string literals that are not docstrings.
 
     Docstrings are excluded from the mask deliberately: a TODO written in a
@@ -377,7 +387,7 @@ def _python_data_string_spans(code):
     return spans
 
 
-def _generic_data_string_spans(code):
+def _generic_data_string_spans(code: str) -> list[Span]:
     """Return char spans of quoted string literals for non-Python sources.
 
     This is a lexical approximation: it tracks single, double and backtick
@@ -410,7 +420,7 @@ def _generic_data_string_spans(code):
     return spans
 
 
-def _in_spans(position, spans):
+def _in_spans(position: int, spans: list[Span]) -> bool:
     """True if char offset `position` falls inside any (start, end) span."""
     return any(start <= position < end for start, end in spans)
 
@@ -427,7 +437,7 @@ _ABSTRACT_DECORATORS = frozenset(
 _ABSTRACT_BASES = frozenset({"Protocol", "ABC", "ABCMeta", "typing.Protocol", "abc.ABC"})
 
 
-def _decorator_name(node):
+def _decorator_name(node: ast.expr) -> str:
     """Render a decorator expression as a dotted name, best effort."""
     if isinstance(node, ast.Name):
         return node.id
@@ -438,7 +448,7 @@ def _decorator_name(node):
     return ""
 
 
-def _base_name(node):
+def _base_name(node: ast.expr) -> str:
     """Render a class base expression as a dotted name, best effort."""
     if isinstance(node, ast.Name):
         return node.id
@@ -449,7 +459,7 @@ def _base_name(node):
     return ""
 
 
-def _body_is_trivial(body):
+def _body_is_trivial(body: list[ast.stmt]) -> bool:
     """True if a function body is only pass, ..., or a docstring plus those."""
     statements = list(body)
     if (
@@ -474,7 +484,7 @@ def _body_is_trivial(body):
     return True
 
 
-def _python_ast_findings(code):
+def _python_ast_findings(code: str) -> list[Finding]:
     """AST-derived findings for Python: abstract-aware stubs, except/pass, and
     the deep logic rules (Po10 metrics, empty loops, identical branches,
     constant conditions, unreachable code).
@@ -544,7 +554,7 @@ def _python_ast_findings(code):
     return findings
 
 
-def _has_explanatory_comment(code, line_number):
+def _has_explanatory_comment(code: str, line_number: int) -> bool:
     """True if the given 1-based line carries a trailing or adjacent comment."""
     lines = code.splitlines()
     for candidate in (line_number - 1, line_number):
@@ -558,7 +568,7 @@ def _has_explanatory_comment(code, line_number):
 # --------------------------------------------------------------------------
 
 
-def _line_text(code, line_number):
+def _line_text(code: str, line_number: int) -> str:
     """Return the stripped, truncated text of a 1-based line number."""
     lines = code.splitlines()
     if 1 <= line_number <= len(lines):
@@ -566,7 +576,7 @@ def _line_text(code, line_number):
     return ""
 
 
-def _is_python(code, language):
+def _is_python(code: str, language: str | None) -> bool:
     """Decide whether to apply Python AST analysis to this source."""
     if language:
         return language.strip().lower() in ("python", "py", "python3")
@@ -582,7 +592,7 @@ def _is_python(code, language):
 _DOCSTRING_TRIGGER_RE = re.compile(r"TODO|FIXME|placeholder|not implemented", re.IGNORECASE)
 
 
-def _python_trigger_docstring_ranges(code):
+def _python_trigger_docstring_ranges(code: str) -> list[Span] | None:
     """Line ranges of real docstrings that contain incomplete-work triggers.
 
     Regex cannot decide triple-quote parity: a pattern anchored on triple
@@ -596,7 +606,7 @@ def _python_trigger_docstring_ranges(code):
         tree = ast.parse(code)
     except PARSER_REFUSALS:
         return None
-    ranges = []
+    ranges: list[Span] = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -604,20 +614,23 @@ def _python_trigger_docstring_ranges(code):
         if not body or not isinstance(body[0], ast.Expr):
             continue
         value = body[0].value
-        is_docstring = isinstance(value, ast.Constant) and isinstance(value.value, str)
-        if is_docstring and _DOCSTRING_TRIGGER_RE.search(value.value):
+        if (
+            isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+            and _DOCSTRING_TRIGGER_RE.search(value.value)
+        ):
             ranges.append((body[0].lineno, body[0].end_lineno or body[0].lineno))
     return ranges
 
 
-def _docstring_finding_is_verified(line_number, trigger_ranges):
+def _docstring_finding_is_verified(line_number: int, trigger_ranges: list[Span] | None) -> bool:
     """True when a docstring_todo hit lies inside a genuine trigger docstring."""
     if trigger_ranges is None:
         return True
     return any(start <= line_number <= end for start, end in trigger_ranges)
 
 
-def _csi_findings(code, language, is_python):
+def _csi_findings(code: str, language: str | None, is_python: bool) -> tuple[list[Finding], str | None]:
     """Run CodebaseCSI's MockCodeDetector and normalise its output.
 
     Python sources get one extra verification step: docstring_todo hits are
@@ -631,7 +644,7 @@ def _csi_findings(code, language, is_python):
 
     trigger_ranges = _python_trigger_docstring_ranges(code) if is_python else None
 
-    findings = []
+    findings: list[Finding] = []
     for pattern in result.get("patterns", []):
         pattern_type = getattr(pattern, "pattern_type", None)
         line_number = getattr(pattern, "line_number", 0)
@@ -657,9 +670,9 @@ def _csi_findings(code, language, is_python):
     return findings, None
 
 
-def _prose_findings(code, string_spans):
+def _prose_findings(code: str, string_spans: list[Span]) -> list[Finding]:
     """Apply the Constitution prose and structural rules with span masking."""
-    findings = []
+    findings: list[Finding] = []
     for regex, failure_class, description, severity, kind in PROSE_RULES:
         suppressible = kind in _SUPPRESSIBLE_IN_STRINGS
         for match in regex.finditer(code):
@@ -677,13 +690,13 @@ def _prose_findings(code, string_spans):
     return findings
 
 
-def _deduplicate(findings):
+def _deduplicate(findings: list[Finding]) -> list[Finding]:
     """Collapse findings that report the same problem on the same line.
 
     Keys on (line, class, finding). Where duplicates differ in severity the
     strictest is retained, so a violation is never masked by a warning.
     """
-    merged = {}
+    merged: dict[tuple[Any, Any, Any], Finding] = {}
     for finding in findings:
         key = (finding["line"], finding["class"], finding["finding"])
         existing = merged.get(key)
@@ -692,7 +705,7 @@ def _deduplicate(findings):
     return list(merged.values())
 
 
-def scan_code(code, language=None):
+def scan_code(code: str, language: str | None = None) -> dict[str, Any]:
     """Scan code for Zero-Framework-Tolerance violations.
 
     Args:

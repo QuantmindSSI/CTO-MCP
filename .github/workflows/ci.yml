@@ -34,6 +34,21 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
 
+  types:
+    # mypy --strict over the first-party package (configured in pyproject:
+    # 3.9 target, vendored codebase_csi outside the regime). Pinned for the
+    # same reason ruff is: a checker release must not redden an unchanged
+    # commit.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the package and the pinned mypy
+        run: pip install --disable-pip-version-check ".[ast]" "mypy==1.19.1"
+      - run: mypy
+
   test:
     runs-on: ubuntu-latest
     strategy:

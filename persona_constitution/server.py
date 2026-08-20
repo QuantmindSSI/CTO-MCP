@@ -32,12 +32,21 @@ Data source resolution order for CONSTITUTION.md:
      so that existing checkouts and configs do not break.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import sys
 import time
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from re import Pattern
+from typing import (
+    Any,
+    Callable,
+    TextIO,
+)
 
 # The scanner backend lives in a sibling module and depends on `codebase-csi`.
 # server.py is launched both as a script (by opencode) and imported as part of
@@ -150,7 +159,7 @@ PROHIBITED MARKERS (any occurrence means the output has failed):
 # --------------------------------------------------------------------------
 
 
-def resolve_constitution_path():
+def resolve_constitution_path() -> Path:
     """Return the Path to CONSTITUTION.md.
 
     Resolution order:
@@ -174,7 +183,7 @@ def resolve_constitution_path():
     return DEFAULT_CONSTITUTION_PATH
 
 
-def load_constitution(path=None):
+def load_constitution(path: str | Path | None = None) -> str:
     """Read CONSTITUTION.md from disk and return its full text.
 
     Raises FileNotFoundError if absent and ValueError if empty, so a broken
@@ -193,7 +202,7 @@ def load_constitution(path=None):
     return text
 
 
-def split_headings(text, level):
+def split_headings(text: str, level: int) -> list[tuple[str, str]]:
     """Split markdown into (heading, body) tuples at the given heading level.
 
     `level` is 2 for "## " or 3 for "### ". Fenced code blocks are respected:
@@ -202,9 +211,9 @@ def split_headings(text, level):
     """
     assert level in (2, 3), "only heading levels 2 and 3 are used"
     prefix = "#" * level + " "
-    sections = []
-    current_heading = None
-    current_lines = []
+    sections: list[tuple[str, str]] = []
+    current_heading: str | None = None
+    current_lines: list[str] = []
     in_fence = False
     for line in text.splitlines():
         if line.lstrip().startswith("```"):
@@ -221,7 +230,7 @@ def split_headings(text, level):
     return sections
 
 
-def find_section(text, heading_prefix):
+def find_section(text: str, heading_prefix: str) -> str | None:
     """Return 'heading\\n\\nbody' for the level-2 section whose heading starts
     with `heading_prefix`, or None if absent."""
     for heading, body in split_headings(text, 2):
@@ -230,7 +239,7 @@ def find_section(text, heading_prefix):
     return None
 
 
-def find_subsection(text, pattern):
+def find_subsection(text: str, pattern: Pattern[str]) -> str | None:
     """Return 'heading\\n\\nbody' for the first level-3 section whose heading
     matches the compiled regex `pattern`, or None if absent."""
     for heading, body in split_headings(text, 3):
@@ -281,7 +290,7 @@ MAX_MESSAGE_CHARS = 50_000_000
 # --------------------------------------------------------------------------
 
 
-def tool_get_constitution(constitution, args):
+def tool_get_constitution(constitution: str, args: dict[str, Any]) -> str:
     """Return the full constitution or one named section."""
     section = args.get("section", "toc")
     if section == "full":
@@ -299,17 +308,19 @@ def tool_get_constitution(constitution, args):
             lines.append(supreme)
         return "\n".join(lines)
     section = DEPRECATED_SECTION_ALIASES.get(section, section)
-    prefix = SECTION_MAP.get(section)
-    if prefix is None:
+    heading_prefix = SECTION_MAP.get(section)
+    if heading_prefix is None:
         valid = ", ".join([*SECTION_MAP, "full", "toc"])
         raise ValueError(f"Unknown section '{section}'. Valid values: {valid}")
-    result = find_section(constitution, prefix)
+    result = find_section(constitution, heading_prefix)
     if result is None:
-        raise ValueError(f"Section '{section}' (heading prefix '{prefix}') not found in constitution file.")
+        raise ValueError(
+            f"Section '{section}' (heading prefix '{heading_prefix}') not found in constitution file."
+        )
     return result
 
 
-KA_TITLES = {
+KA_TITLES: dict[int, str] = {
     1: "Software Requirements",
     2: "Software Architecture",
     3: "Software Design",
@@ -331,7 +342,7 @@ KA_TITLES = {
 }
 
 
-def _resolve_ka_number(ka):
+def _resolve_ka_number(ka: Any) -> int | None:
     """Map a ka argument (number, digit string, or name substring) to 1-18."""
     if isinstance(ka, (int, float)) and int(ka) == ka:
         return int(ka)
@@ -348,7 +359,7 @@ def _resolve_ka_number(ka):
     return matches[0] if matches else None
 
 
-def tool_get_knowledge_area(constitution, args):
+def tool_get_knowledge_area(constitution: str, args: dict[str, Any]) -> str:
     """Return one SWEBOK v4.0 Knowledge Area by number (1-18) or name."""
     ka = args.get("ka")
     if ka is None:
@@ -364,7 +375,7 @@ def tool_get_knowledge_area(constitution, args):
     return result
 
 
-def tool_get_power_of_10(constitution, args):
+def tool_get_power_of_10(constitution: str, args: dict[str, Any]) -> str:
     """Return one Power of 10 rule (1-10) or all ten."""
     rule = args.get("rule")
     part_ix = find_section(constitution, "PART IX")
@@ -385,7 +396,7 @@ def tool_get_power_of_10(constitution, args):
     return result
 
 
-def tool_get_verification_gates(constitution, args):  # noqa: ARG001 - uniform handler signature
+def tool_get_verification_gates(constitution: str, args: dict[str, Any]) -> str:  # noqa: ARG001 - uniform handler signature
     """Return the G1-G5 gates plus the prohibited-marker checklist.
 
     Takes `constitution` and `args` it does not read: every tool handler shares
@@ -394,7 +405,7 @@ def tool_get_verification_gates(constitution, args):  # noqa: ARG001 - uniform h
     return VERIFICATION_GATES
 
 
-def tool_scan_code_for_violations(constitution, args):  # noqa: ARG001 - uniform handler signature
+def tool_scan_code_for_violations(constitution: str, args: dict[str, Any]) -> str:  # noqa: ARG001 - uniform handler signature
     """Run the static Zero-Framework-Tolerance scan over the supplied code.
 
     `constitution` is unused: the scan is purely static and needs no corpus.
@@ -413,7 +424,7 @@ def tool_scan_code_for_violations(constitution, args):  # noqa: ARG001 - uniform
     return json.dumps(result, indent=2)
 
 
-def _require_string_list(args, name):
+def _require_string_list(args: dict[str, Any], name: str) -> list[str] | None:
     """Optional array-of-strings argument, validated loudly."""
     value = args.get(name)
     if value is not None and (
@@ -423,7 +434,7 @@ def _require_string_list(args, name):
     return value
 
 
-def _require_files_map(args):
+def _require_files_map(args: dict[str, Any]) -> dict[str, str] | None:
     """Optional path -> content object argument, validated loudly and bounded."""
     files = args.get("files")
     if files is None:
@@ -444,7 +455,7 @@ def _require_files_map(args):
     return files
 
 
-def tool_review_patch(constitution, args):  # noqa: ARG001 - uniform handler signature
+def tool_review_patch(constitution: str, args: dict[str, Any]) -> str:  # noqa: ARG001 - uniform handler signature
     """Review a unified diff with the diff-aware constitution gate.
 
     `constitution` is unused: the review is purely static. The caller (an
@@ -473,7 +484,7 @@ def tool_review_patch(constitution, args):  # noqa: ARG001 - uniform handler sig
     return json.dumps(result, indent=2)
 
 
-TOOLS = {
+TOOLS: dict[str, dict[str, Any]] = {
     "get_constitution": {
         "handler": tool_get_constitution,
         "description": (
@@ -640,15 +651,15 @@ TOOLS = {
 # --------------------------------------------------------------------------
 
 
-def make_result(request_id, result):
+def make_result(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def make_error(request_id, code, message):
+def make_error(request_id: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 
-def handle_initialize(params, request_id, _constitution):
+def handle_initialize(params: dict[str, Any], request_id: Any, _constitution: str) -> dict[str, Any]:
     client_version = params.get("protocolVersion")
     # Echo the client's version only when this server actually implements it;
     # for unknown or malformed values, offer the latest version we support.
@@ -669,7 +680,7 @@ def handle_initialize(params, request_id, _constitution):
     )
 
 
-def handle_tools_list(_params, request_id, _constitution):
+def handle_tools_list(_params: dict[str, Any], request_id: Any, _constitution: str) -> dict[str, Any]:
     tools = [
         {"name": name, "description": spec["description"], "inputSchema": spec["inputSchema"]}
         for name, spec in TOOLS.items()
@@ -677,11 +688,14 @@ def handle_tools_list(_params, request_id, _constitution):
     return make_result(request_id, {"tools": tools})
 
 
-def handle_tools_call(params, request_id, constitution):
+def handle_tools_call(params: dict[str, Any], request_id: Any, constitution: str) -> dict[str, Any]:
     name = params.get("name")
-    spec = TOOLS.get(name)
-    if spec is None:
+    # isinstance, not a bare dict lookup: an unhashable name (a list, say)
+    # would raise inside dict.get and surface as INTERNAL_ERROR; a caller
+    # mistake must always be INVALID_PARAMS.
+    if not isinstance(name, str) or name not in TOOLS:
         return make_error(request_id, INVALID_PARAMS, f"Unknown tool: {name!r}")
+    spec = TOOLS[name]
     arguments = params.get("arguments") or {}
     if not isinstance(arguments, dict):
         return make_error(request_id, INVALID_PARAMS, "Tool arguments must be an object.")
@@ -696,11 +710,11 @@ def handle_tools_call(params, request_id, constitution):
         )
 
 
-def handle_ping(_params, request_id, _constitution):
+def handle_ping(_params: dict[str, Any], request_id: Any, _constitution: str) -> dict[str, Any]:
     return make_result(request_id, {})
 
 
-REQUEST_HANDLERS = {
+REQUEST_HANDLERS: dict[str, Callable[[dict[str, Any], Any, str], dict[str, Any]]] = {
     "initialize": handle_initialize,
     "tools/list": handle_tools_list,
     "tools/call": handle_tools_call,
@@ -708,7 +722,7 @@ REQUEST_HANDLERS = {
 }
 
 
-def _route(message, constitution):
+def _route(message: dict[str, Any], constitution: str) -> dict[str, Any] | None:
     """Resolve and invoke the handler for a well-formed message.
 
     Unknown methods - including the notifications/* family, which this
@@ -732,7 +746,7 @@ def _route(message, constitution):
         return make_error(request_id, INTERNAL_ERROR, f"Internal error: {exc}")
 
 
-def dispatch(message, constitution):
+def dispatch(message: Any, constitution: str) -> dict[str, Any] | None:
     """Route one parsed JSON-RPC message. Returns a response dict or None.
 
     Silence is reserved for well-formed notifications: a dict with
@@ -753,7 +767,7 @@ def dispatch(message, constitution):
     return None if "id" not in message else response
 
 
-def _debug_line(method, tool, frame_chars, response_chars, elapsed_ms):
+def _debug_line(method: str, tool: str, frame_chars: int, response_chars: int, elapsed_ms: float) -> None:
     """One structured diagnostics line on stderr.
 
     Sizes and durations only, never payload content: the code this server
@@ -769,7 +783,7 @@ def _debug_line(method, tool, frame_chars, response_chars, elapsed_ms):
     )
 
 
-def _write_response(stdout, response):
+def _write_response(stdout: TextIO, response: dict[str, Any]) -> str:
     """Serialise one response, write it as a frame, flush so the client
     never blocks on a buffered reply. Returns the encoded text (for size
     diagnostics)."""
@@ -779,11 +793,11 @@ def _write_response(stdout, response):
     return encoded
 
 
-def _elapsed_ms(started):
+def _elapsed_ms(started: float) -> float:
     return (time.monotonic() - started) * 1000.0
 
 
-def _frame_identity(message):
+def _frame_identity(message: Any) -> tuple[str, str]:
     """(method, tool) labels for diagnostics; malformed frames get fixed
     fallback labels so the log line always has the same shape."""
     method = message.get("method") if isinstance(message, dict) else None
@@ -796,7 +810,7 @@ def _frame_identity(message):
     return method_label, tool
 
 
-def _serve_one(raw_line, stdout, constitution, debug):
+def _serve_one(raw_line: str, stdout: TextIO, constitution: str, debug: bool) -> None:
     """Process one raw input line end to end: bound it, parse it, dispatch
     it, answer it, and (in debug mode) account for it on stderr."""
     started = time.monotonic()
@@ -830,7 +844,7 @@ def _serve_one(raw_line, stdout, constitution, debug):
         _debug_line(method_label, tool, len(raw_line), len(encoded), _elapsed_ms(started))
 
 
-def serve(stdin, stdout, constitution, debug=False):
+def serve(stdin: Iterable[str], stdout: TextIO, constitution: str, debug: bool = False) -> None:
     """Read newline-delimited JSON-RPC messages from `stdin`, write responses
     to `stdout`, until `stdin` reaches EOF.
 
@@ -842,7 +856,7 @@ def serve(stdin, stdout, constitution, debug=False):
         _serve_one(raw_line, stdout, constitution, debug)
 
 
-def _debug_enabled(argv, environ):
+def _debug_enabled(argv: Sequence[str], environ: Mapping[str, str]) -> bool:
     """Diagnostics opt-in: the --debug flag or a truthy env var. Both exist
     because MCP hosts differ in which of args and env they let users set."""
     if "--debug" in argv:
@@ -850,7 +864,7 @@ def _debug_enabled(argv, environ):
     return environ.get("PERSONA_CONSTITUTION_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def main():
+def main() -> None:
     """Serve MCP over stdio until stdin closes. Never writes non-protocol bytes
     to stdout; diagnostics go to stderr. Exits 1 on unusable installation."""
     try:

@@ -10,8 +10,11 @@ whole parse) but strict about resource bounds: input larger than
 MAX_DIFF_BYTES is rejected up front.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
+from re import Match
 
 # A PR diff larger than this is not reviewable line-by-line in any meaningful
 # sense; the caller should review the PR's scope instead. 10 MB of diff text.
@@ -44,10 +47,10 @@ class FileDiff:
     old_path: str
     status: str = STATUS_MODIFIED
     is_binary: bool = False
-    added_lines: "dict[int, str]" = field(default_factory=dict)
+    added_lines: dict[int, str] = field(default_factory=dict)
 
 
-_ESCAPE_BYTES = {
+_ESCAPE_BYTES: dict[str, int] = {
     "\\": 0x5C,
     '"': 0x22,
     "n": 0x0A,
@@ -60,7 +63,7 @@ _ESCAPE_BYTES = {
 }
 
 
-def _unquote_git_path(path):
+def _unquote_git_path(path: str) -> str:
     """Decode a git-quoted path: surrounding quotes, C escapes, \\NNN octal.
 
     Git quotes paths containing non-ASCII or special bytes (core.quotePath
@@ -95,7 +98,7 @@ def _unquote_git_path(path):
     return decoded.decode("utf-8", errors="replace")
 
 
-def _strip_prefix(path):
+def _strip_prefix(path: str) -> str:
     """Strip the a/ or b/ prefix git puts on diff paths, and unquote."""
     path = _unquote_git_path(path)
     if path.startswith(("a/", "b/")):
@@ -103,7 +106,7 @@ def _strip_prefix(path):
     return path
 
 
-def _split_git_header(line):
+def _split_git_header(line: str) -> tuple[str | None, str | None]:
     """Extract (old_path, new_path) from a `diff --git a/x b/y` line.
 
     Paths containing " b/" are ambiguous in this header; the authoritative
@@ -122,19 +125,19 @@ def _split_git_header(line):
 class _FileBuilder:
     """Accumulates header and hunk state for one file section."""
 
-    def __init__(self, old_path, new_path):
+    def __init__(self, old_path: str | None, new_path: str | None) -> None:
         self.old_path = old_path
         self.new_path = new_path
         self.is_binary = False
         self.is_new = False
         self.is_deleted = False
         self.is_renamed = False
-        self.added_lines = {}
+        self.added_lines: dict[int, str] = {}
         self._new_line = 0
         self._old_remaining = 0
         self._new_remaining = 0
 
-    def _flag_header(self, line):
+    def _flag_header(self, line: str) -> bool:
         """Consume a status-flag header line. Returns True when it matched."""
         if line.startswith("new file mode"):
             self.is_new = True
@@ -146,7 +149,7 @@ class _FileBuilder:
             return False
         return True
 
-    def header(self, line):
+    def header(self, line: str) -> None:
         """Consume one extended-header line."""
         if self._flag_header(line):
             return
@@ -162,17 +165,17 @@ class _FileBuilder:
             self.new_path = _strip_prefix(line[4:].split("\t")[0])
 
     @property
-    def in_hunk(self):
+    def in_hunk(self) -> bool:
         """True while either side of the current hunk has budget left."""
         return self._old_remaining > 0 or self._new_remaining > 0
 
-    def start_hunk(self, match):
+    def start_hunk(self, match: Match[str]) -> None:
         """Arm the line budgets from an @@ header match."""
         self._new_line = int(match.group(3))
         self._old_remaining = int(match.group(2)) if match.group(2) is not None else 1
         self._new_remaining = int(match.group(4)) if match.group(4) is not None else 1
 
-    def consume(self, raw):
+    def consume(self, raw: str) -> None:
         """Consume one content line inside a hunk.
 
         A hunk ends exactly when both sides' declared line budgets are
@@ -191,7 +194,7 @@ class _FileBuilder:
             self._old_remaining -= 1
             self._new_remaining -= 1
 
-    def build(self):
+    def build(self) -> FileDiff:
         """Produce the immutable FileDiff."""
         if self.is_deleted:
             status = STATUS_DELETED
@@ -211,7 +214,7 @@ class _FileBuilder:
         )
 
 
-def parse_unified_diff(diff_text):
+def parse_unified_diff(diff_text: str) -> list[FileDiff]:
     """Parse unified diff text into FileDiff records.
 
     Args:
@@ -232,8 +235,8 @@ def parse_unified_diff(diff_text):
     if len(diff_text.encode("utf-8", errors="replace")) > MAX_DIFF_BYTES:
         raise ValueError(f"diff exceeds MAX_DIFF_BYTES ({MAX_DIFF_BYTES} bytes); review scope instead")
 
-    files = []
-    builder = None
+    files: list[FileDiff] = []
+    builder: _FileBuilder | None = None
     for raw in diff_text.splitlines():
         if raw.startswith("diff --git "):
             if builder is not None:

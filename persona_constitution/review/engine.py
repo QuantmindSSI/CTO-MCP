@@ -30,17 +30,25 @@ SecurityAnalyzer was evaluated and failed to flag plain os.system injection
 and hardcoded credentials, so it is not trusted to gate merges.
 """
 
+from __future__ import annotations
+
+from collections.abc import Sequence
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
+from typing import Any
 
 from codebase_csi.parsers.ast_parser import LANGUAGE_EXTENSIONS
 
 try:
     from ..scanner import scan_code
-    from .diff import STATUS_DELETED, parse_unified_diff
+    from .diff import STATUS_DELETED, FileDiff, parse_unified_diff
 except ImportError:  # pragma: no cover - direct module execution
-    from persona_constitution.review.diff import STATUS_DELETED, parse_unified_diff
+    from persona_constitution.review.diff import STATUS_DELETED, FileDiff, parse_unified_diff
     from persona_constitution.scanner import scan_code
+
+# Scanner-schema finding and per-file report dicts.
+Finding = dict[str, Any]
+FileReport = dict[str, Any]
 
 # Bounds (Power of 10 rule 3: bound all resource growth).
 MAX_FILES = 400
@@ -85,7 +93,7 @@ DEFAULT_TEST_GLOBS = (
 )
 
 
-def is_test_path(path, extra_globs=()):
+def is_test_path(path: str, extra_globs: Sequence[str] = ()) -> bool:
     """True when a path belongs to any recognised test convention."""
     basename = PurePosixPath(path).name
     for pattern in tuple(DEFAULT_TEST_GLOBS) + tuple(extra_globs):
@@ -94,19 +102,24 @@ def is_test_path(path, extra_globs=()):
     return False
 
 
-def language_for_path(path):
+def language_for_path(path: str) -> str | None:
     """Map a file path to a scanner language hint via its extension.
 
     Returns None for files this engine does not treat as reviewable code
     (docs, configs, lockfiles, unknown extensions).
     """
     suffix = PurePosixPath(path).suffix.lower()
-    return LANGUAGE_EXTENSIONS.get(suffix)
+    language = LANGUAGE_EXTENSIONS.get(suffix)
+    # The table is vendored (untyped); guard its shape at the boundary
+    # instead of trusting it.
+    return language if isinstance(language, str) else None
 
 
-def _attribute_findings(all_findings, added_lines):
+def _attribute_findings(
+    all_findings: list[Finding], added_lines: dict[int, str]
+) -> tuple[list[Finding], dict[str, int]]:
     """Split scanner findings into (attributed, pre_existing) by added lines."""
-    attributed = []
+    attributed: list[Finding] = []
     pre_existing = {"violations": 0, "warnings": 0}
     for finding in all_findings:
         if finding["line"] in added_lines:
@@ -118,12 +131,12 @@ def _attribute_findings(all_findings, added_lines):
     return attributed, pre_existing
 
 
-def _scan_fragment(file_diff, language):
+def _scan_fragment(file_diff: FileDiff, language: str | None) -> tuple[list[Finding], list[str]]:
     """Hunk-only scan: added lines as a fragment, mapped to new-file lines."""
     line_numbers = sorted(file_diff.added_lines)
     fragment = "\n".join(file_diff.added_lines[number] for number in line_numbers)
     result = scan_code(fragment, language=language)
-    findings = []
+    findings: list[Finding] = []
     for finding in result["findings"]:
         fragment_line = finding["line"]
         if 1 <= fragment_line <= len(line_numbers):
@@ -133,7 +146,7 @@ def _scan_fragment(file_diff, language):
     return findings, result["engines"]
 
 
-def _skip(path, language, reason):
+def _skip(path: str, language: str | None, reason: str) -> FileReport:
     """Record a file the engine did not scan, and why."""
     return {
         "path": path,
@@ -145,7 +158,7 @@ def _skip(path, language, reason):
     }
 
 
-def _is_excluded(path, exclude):
+def _is_excluded(path: str, exclude: Sequence[str]) -> bool:
     """True when the path matches any exclusion glob.
 
     fnmatch semantics: `*` crosses directory separators, so `tests/*`
@@ -154,7 +167,7 @@ def _is_excluded(path, exclude):
     return any(fnmatch(path, pattern) for pattern in exclude)
 
 
-def _skip_reason(file_diff, language, exclude):
+def _skip_reason(file_diff: FileDiff, language: str | None, exclude: Sequence[str] | None) -> str | None:
     """Why this file is outside the gate's jurisdiction, or None to scan it."""
     if exclude and _is_excluded(file_diff.path, exclude):
         return "excluded"
@@ -169,7 +182,9 @@ def _skip_reason(file_diff, language, exclude):
     return None
 
 
-def _scan_file(file_diff, source, language):
+def _scan_file(
+    file_diff: FileDiff, source: str | None, language: str | None
+) -> tuple[list[Finding], dict[str, int], list[str], str]:
     """Scan one file in full or hunk mode. Returns (findings, pre_existing, engines, mode)."""
     if source is not None:
         result = scan_code(source, language=language)
@@ -179,7 +194,9 @@ def _scan_file(file_diff, source, language):
     return findings, {"violations": 0, "warnings": 0}, engines, MODE_HUNK
 
 
-def _review_file(file_diff, contents, exclude):
+def _review_file(
+    file_diff: FileDiff, contents: dict[str, str] | None, exclude: Sequence[str] | None
+) -> tuple[FileReport, list[str]]:
     """Review one FileDiff. Returns (file_report, engines_used)."""
     language = language_for_path(file_diff.path)
     reason = _skip_reason(file_diff, language, exclude)
@@ -209,7 +226,7 @@ def _review_file(file_diff, contents, exclude):
     }, engines
 
 
-def _coverage_finding(file_diff, severity):
+def _coverage_finding(file_diff: FileDiff, severity: str) -> Finding:
     """Build the C-03 finding for one uncovered production file."""
     first_added = min(file_diff.added_lines)
     return {
@@ -226,7 +243,7 @@ def _coverage_finding(file_diff, severity):
     }
 
 
-def _escalate_verdict(report, severity):
+def _escalate_verdict(report: FileReport, severity: str) -> None:
     """Raise a file verdict to match a policy finding's severity."""
     if severity == "violation" and report["verdict"] != "FAIL":
         report["verdict"] = "FAIL"
@@ -234,7 +251,13 @@ def _escalate_verdict(report, severity):
         report["verdict"] = "REVIEW"
 
 
-def _flag_uncovered_report(report, diffs_by_path, globs, severity, min_lines):
+def _flag_uncovered_report(
+    report: FileReport,
+    diffs_by_path: dict[str, FileDiff],
+    globs: tuple[str, ...],
+    severity: str,
+    min_lines: int,
+) -> None:
     """Apply the C-03 finding to one file report when it qualifies."""
     if report["mode"].startswith("skipped-") or is_test_path(report["path"], globs):
         return
@@ -245,7 +268,13 @@ def _flag_uncovered_report(report, diffs_by_path, globs, severity, min_lines):
     _escalate_verdict(report, severity)
 
 
-def _coverage_policy_findings(reports, file_diffs, require_tests, test_globs, min_lines):
+def _coverage_policy_findings(
+    reports: list[FileReport],
+    file_diffs: list[FileDiff],
+    require_tests: str,
+    test_globs: Sequence[str] | None,
+    min_lines: int,
+) -> None:
     """C-03 findings: production logic changed with no test changes anywhere.
 
     The deterministic contract is deliberately diff-global: if the change
@@ -267,7 +296,7 @@ def _coverage_policy_findings(reports, file_diffs, require_tests, test_globs, mi
         _flag_uncovered_report(report, diffs_by_path, globs, severity, min_lines)
 
 
-def _summary(verdict, totals):
+def _summary(verdict: str, totals: dict[str, int]) -> str:
     """Human-readable disposition mirroring scan_code's contract."""
     if verdict == "FAIL":
         return (
@@ -290,7 +319,7 @@ def _summary(verdict, totals):
     )
 
 
-def _aggregate(files):
+def _aggregate(files: list[FileReport]) -> dict[str, int]:
     """Fold per-file reports into the totals dict."""
     totals = {
         "violations": 0,
@@ -315,10 +344,14 @@ def _aggregate(files):
     return totals
 
 
-def _review_files(file_diffs, file_contents, exclude):
+def _review_files(
+    file_diffs: list[FileDiff],
+    file_contents: dict[str, str] | None,
+    exclude: Sequence[str] | None,
+) -> tuple[list[FileReport], set[str]]:
     """Review every FileDiff. Returns (file reports, engines used)."""
-    files = []
-    engines_used = set()
+    files: list[FileReport] = []
+    engines_used: set[str] = set()
     for file_diff in file_diffs:
         report, engines = _review_file(file_diff, file_contents, exclude)
         engines_used.update(engines)
@@ -327,13 +360,13 @@ def _review_files(file_diffs, file_contents, exclude):
 
 
 def review_patch(
-    diff_text,
-    file_contents=None,
-    exclude=None,
-    require_tests="off",
-    test_globs=None,
-    min_test_trigger_lines=5,
-):
+    diff_text: str,
+    file_contents: dict[str, str] | None = None,
+    exclude: list[str] | None = None,
+    require_tests: str = "off",
+    test_globs: list[str] | None = None,
+    min_test_trigger_lines: int = 5,
+) -> dict[str, Any]:
     """Review a unified diff against the Zero-Framework-Tolerance rules.
 
     Args:
@@ -375,7 +408,7 @@ def review_patch(
     return _assemble_review(files, engines_used)
 
 
-def _assemble_review(files, engines_used):
+def _assemble_review(files: list[FileReport], engines_used: set[str]) -> dict[str, Any]:
     """Fold file reports into the final review dict."""
     totals = _aggregate(files)
     verdict = _overall_verdict(totals)
@@ -388,7 +421,7 @@ def _assemble_review(files, engines_used):
     }
 
 
-def _overall_verdict(totals):
+def _overall_verdict(totals: dict[str, int]) -> str:
     """FAIL on any attributed violation, REVIEW on warnings, else PASS."""
     if totals["violations"] > 0:
         return "FAIL"

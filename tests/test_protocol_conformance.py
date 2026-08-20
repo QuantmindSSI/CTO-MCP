@@ -286,8 +286,7 @@ class TestServeTransportFuzz(unittest.TestCase):
     def test_garbage_lines_then_ping_still_answers(self):
         rng = random.Random(FUZZ_SEED)
         garbage = [
-            "".join(rng.choices(string.printable.replace("\n", ""), k=rng.randint(1, 80)))
-            for _ in range(200)
+            "".join(rng.choices(string.printable.replace("\n", ""), k=rng.randint(1, 80))) for _ in range(200)
         ]
         ping = json.dumps({"jsonrpc": "2.0", "id": 77, "method": "ping"})
         out, _ = self._serve("\n".join([*garbage, ping]) + "\n")

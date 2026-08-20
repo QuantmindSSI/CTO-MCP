@@ -10,12 +10,15 @@ The token is read by the caller and passed in; this module never touches the
 environment and never logs the token.
 """
 
+from __future__ import annotations
+
 import base64
 import json
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from typing import Any
 
 DEFAULT_API_URL = "https://api.github.com"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -31,7 +34,7 @@ MAX_CONTENT_BYTES = 1024 * 1024
 class GitHubError(RuntimeError):
     """A GitHub API call failed definitively (after bounded retries)."""
 
-    def __init__(self, status, message):
+    def __init__(self, status: int, message: str) -> None:
         super().__init__(f"GitHub API error {status}: {message}")
         self.status = status
 
@@ -39,7 +42,7 @@ class GitHubError(RuntimeError):
 class GitHubClient:
     """Authenticated client scoped to one API base URL."""
 
-    def __init__(self, token, api_url=DEFAULT_API_URL):
+    def __init__(self, token: str, api_url: str = DEFAULT_API_URL) -> None:
         # Explicit raise, not assert: auth-input validation must survive
         # `python -O`, which strips assert statements.
         if not token:
@@ -47,11 +50,17 @@ class GitHubClient:
         self._token = token
         self._api_url = api_url.rstrip("/")
 
-    def _request(self, method, path, body=None, accept="application/vnd.github+json"):
+    def _request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        accept: str = "application/vnd.github+json",
+    ) -> tuple[int, bytes]:
         """Perform one bounded-retry request; returns (status, raw bytes)."""
         url = self._api_url + path
         payload = json.dumps(body).encode("utf-8") if body is not None else None
-        last_error = None
+        last_error: GitHubError | None = None
         for attempt in range(1, MAX_ATTEMPTS + 1):
             request = urllib.request.Request(url, data=payload, method=method)
             request.add_header("Accept", accept)
@@ -76,17 +85,30 @@ class GitHubClient:
                     time.sleep(BACKOFF_SECONDS * attempt)
                     continue
                 raise GitHubError(0, str(error.reason)) from error
-        raise last_error  # unreachable while MAX_ATTEMPTS >= 1, kept for totality
+        # Unreachable while MAX_ATTEMPTS >= 1; kept for totality, and made
+        # honest for the type checker: raising None is not a thing.
+        if last_error is None:
+            raise GitHubError(0, "retry loop made no attempts")
+        raise last_error
 
-    def _request_json(self, method, path, body=None):
+    def _request_json(self, method: str, path: str, body: dict[str, Any] | None = None) -> Any:
         _, raw = self._request(method, path, body=body)
         return json.loads(raw.decode("utf-8"))
 
-    def get_pull_request(self, owner, repo, number):
-        """PR metadata; head sha lives at ["head"]["sha"]."""
-        return self._request_json("GET", f"/repos/{owner}/{repo}/pulls/{number}")
+    def _request_object(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        """A JSON request whose response must be an object. The API contract
+        says dict; a list or scalar here means we called the wrong endpoint
+        or the API changed shape - fail loudly, never propagate it."""
+        data = self._request_json(method, path, body=body)
+        if not isinstance(data, dict):
+            raise GitHubError(0, f"expected a JSON object from {path}, got {type(data).__name__}")
+        return data
 
-    def get_pull_request_diff(self, owner, repo, number):
+    def get_pull_request(self, owner: str, repo: str, number: int) -> dict[str, Any]:
+        """PR metadata; head sha lives at ["head"]["sha"]."""
+        return self._request_object("GET", f"/repos/{owner}/{repo}/pulls/{number}")
+
+    def get_pull_request_diff(self, owner: str, repo: str, number: int) -> str:
         """The PR's unified diff via the diff media type."""
         _, raw = self._request(
             "GET",
@@ -95,7 +117,7 @@ class GitHubClient:
         )
         return raw.decode("utf-8", errors="replace")
 
-    def get_file_content(self, owner, repo, path, ref):
+    def get_file_content(self, owner: str, repo: str, path: str, ref: str) -> str | None:
         """Full text of a file at a ref, or None when unavailable.
 
         None (rather than an exception) for the three expected cases a review
@@ -117,6 +139,6 @@ class GitHubClient:
             return None
         return base64.b64decode(data.get("content", "")).decode("utf-8", errors="replace")
 
-    def post_review(self, owner, repo, number, payload):
+    def post_review(self, owner: str, repo: str, number: int, payload: dict[str, Any]) -> dict[str, Any]:
         """Create the PR review; returns the API's review object."""
-        return self._request_json("POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", body=payload)
+        return self._request_object("POST", f"/repos/{owner}/{repo}/pulls/{number}/reviews", body=payload)

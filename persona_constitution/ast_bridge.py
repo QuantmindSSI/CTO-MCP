@@ -37,9 +37,17 @@ by the pinned grammar wheels (see the `ast` extra in pyproject.toml), not
 taken from documentation.
 """
 
+from __future__ import annotations
+
 import re
+from typing import Any
 
 from codebase_csi.parsers.ast_parser import TreeSitterParser
+
+# Tree-sitter nodes come from the vendored parser, which is outside the
+# typing regime (follow_imports=skip), so they are honestly Any here.
+# Findings use the scanner schema.
+Finding = dict[str, Any]
 
 try:
     from .logic_rules import (
@@ -211,7 +219,7 @@ _RUST_STUB_MACROS = frozenset({"todo", "unimplemented"})
 _MAX_NODES = 500_000
 
 
-def normalize_language(language):
+def normalize_language(language: str | None) -> str | None:
     """Map a caller-supplied language hint to a canonical grammar name.
 
     Args:
@@ -226,17 +234,17 @@ def normalize_language(language):
     return _LANGUAGE_ALIASES.get(str(language).strip().lower())
 
 
-def _node_text(node, code_bytes):
+def _node_text(node: Any, code_bytes: bytes) -> str:
     """Return the source text of a node, decoded defensively."""
     return code_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
-def _statements(body):
+def _statements(body: Any) -> list[Any]:
     """Named children of a body node, excluding comments."""
     return [child for child in body.named_children if child.type not in _COMMENT_TYPES]
 
 
-def _function_name(node, language, code_bytes):
+def _function_name(node: Any, language: str, code_bytes: bytes) -> str | None:
     """Extract a function's declared name, or None when it is anonymous.
 
     C/C++ nest the identifier inside (pointer_)declarator chains, so the
@@ -257,14 +265,14 @@ def _function_name(node, language, code_bytes):
     return _node_text(name_node, code_bytes)
 
 
-def _is_constructor(node, name):
+def _is_constructor(node: Any, name: str | None) -> bool:
     """True for constructor definitions, which are exempt from all rules."""
     if node.type == "constructor_declaration":
         return True
     return name == "constructor"
 
 
-def _finding(node, failure_class, text, severity="violation"):
+def _finding(node: Any, failure_class: str, text: str, severity: str = "violation") -> Finding:
     """Build one finding in the scanner's schema."""
     return {
         "line": node.start_point[0] + 1,
@@ -275,7 +283,7 @@ def _finding(node, failure_class, text, severity="violation"):
     }
 
 
-def _unwrap_expression(statement):
+def _unwrap_expression(statement: Any) -> Any:
     """Unwrap an expression_statement to its single expression child."""
     if statement.type == "expression_statement":
         inner = _statements(statement)
@@ -284,7 +292,7 @@ def _unwrap_expression(statement):
     return statement
 
 
-def _classify_sole_statement(statement, node, language, code_bytes):
+def _classify_sole_statement(statement: Any, node: Any, language: str, code_bytes: bytes) -> Finding | None:
     """Judge a function whose body is exactly one statement.
 
     Returns a finding for stub-shaped sole statements (hardcoded nullish
@@ -328,7 +336,7 @@ def _classify_sole_statement(statement, node, language, code_bytes):
     return None
 
 
-def _classify_function(node, language, code_bytes):
+def _classify_function(node: Any, language: str, code_bytes: bytes) -> Finding | None:
     """Evaluate one function definition node against the stub rules.
 
     Returns a finding dict or None. Anonymous functions, constructors, and
@@ -360,7 +368,7 @@ def _classify_function(node, language, code_bytes):
     return None
 
 
-def _classify_catch(node):
+def _classify_catch(node: Any) -> Finding | None:
     """Flag catch clauses whose body holds no statements (comments allowed)."""
     body = node.child_by_field_name("body")
     if body is None:
@@ -370,7 +378,7 @@ def _classify_catch(node):
     return None
 
 
-def _classify_loop(node):
+def _classify_loop(node: Any) -> Finding | None:
     """Warn on loops whose body contains no statements."""
     body = node.child_by_field_name("body")
     if body is None:
@@ -380,7 +388,7 @@ def _classify_loop(node):
     return None
 
 
-def _resolve_else(alternative):
+def _resolve_else(alternative: Any) -> Any:
     """Unwrap an else_clause wrapper (js/ts/rust) to its single payload node."""
     if alternative.type == "else_clause":
         inner = _statements(alternative)
@@ -388,7 +396,7 @@ def _resolve_else(alternative):
     return alternative
 
 
-def _classify_branches(node, code_bytes):
+def _classify_branches(node: Any, code_bytes: bytes) -> Finding | None:
     """Warn when if and else arms are textually identical (else-if exempt)."""
     consequence = node.child_by_field_name("consequence")
     alternative = node.child_by_field_name("alternative")
@@ -404,12 +412,12 @@ def _classify_branches(node, code_bytes):
     return None
 
 
-def _nested_function_types(language):
+def _nested_function_types(language: str) -> frozenset[str]:
     """Node types whose subtrees are separate scopes for complexity counting."""
     return _FUNCTION_TYPES[language] | _VALUE_FUNCTION_TYPES | {"constructor_declaration"}
 
 
-def _complexity(function_node, language, code_bytes):
+def _complexity(function_node: Any, language: str, code_bytes: bytes) -> int:
     """McCabe complexity of one function scope, nested functions excluded."""
     skip_types = _nested_function_types(language)
     score = 1
@@ -428,9 +436,9 @@ def _complexity(function_node, language, code_bytes):
     return score
 
 
-def _metric_findings(name, function_node, language, code_bytes):
+def _metric_findings(name: str | None, function_node: Any, language: str, code_bytes: bytes) -> list[Finding]:
     """Po10 Rule 1/4 warnings for one function-like node."""
-    findings = []
+    findings: list[Finding] = []
     label = name or "anonymous"
     complexity = _complexity(function_node, language, code_bytes)
     if complexity > COMPLEXITY_LIMIT:
@@ -457,7 +465,7 @@ def _metric_findings(name, function_node, language, code_bytes):
     return findings
 
 
-def _classify_declarator(node, language, code_bytes):
+def _classify_declarator(node: Any, language: str, code_bytes: bytes) -> list[Finding]:
     """Stub and metric findings for `const name = function/arrow` bindings."""
     name_node = node.child_by_field_name("name")
     value = node.child_by_field_name("value")
@@ -468,7 +476,7 @@ def _classify_declarator(node, language, code_bytes):
         # Expression-bodied arrows (`() => null`) are lambda-equivalent: exempt.
         return []
     name = _node_text(name_node, code_bytes)
-    findings = []
+    findings: list[Finding] = []
     statements = _statements(body)
     if len(statements) == 1:
         stub = _classify_sole_statement(statements[0], node, language, code_bytes)
@@ -478,7 +486,7 @@ def _classify_declarator(node, language, code_bytes):
     return findings
 
 
-def xast_findings(code, language):
+def xast_findings(code: str, language: str | None) -> tuple[list[Finding], bool]:
     """Scan non-Python source with the tree-sitter engine.
 
     Args:
@@ -510,8 +518,8 @@ def xast_findings(code, language):
 
     code_bytes = code.encode("utf-8")
 
-    findings = []
-    stack = [root]
+    findings: list[Finding] = []
+    stack: list[Any] = [root]
     visited = 0
     while stack and visited < _MAX_NODES:
         node = stack.pop()
@@ -523,10 +531,10 @@ def xast_findings(code, language):
     return findings, True
 
 
-def _dispatch_node(node, language, code_bytes):
+def _dispatch_node(node: Any, language: str, code_bytes: bytes) -> list[Finding]:
     """Route one node to every rule that applies to its type."""
     function_types = _FUNCTION_TYPES[language]
-    findings = []
+    findings: list[Finding] = []
     if node.type in function_types or node.type == "constructor_declaration":
         stub = _classify_function(node, language, code_bytes)
         if stub is not None:

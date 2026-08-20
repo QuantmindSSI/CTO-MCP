@@ -28,6 +28,8 @@ Leaf module by design: imports nothing from this package, so both server.py
 without an import cycle.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 
@@ -36,7 +38,7 @@ PACKAGE_DIST_NAME = "persona-constitution-mcp"
 _KEY_VALUE_RE = re.compile(r'^(name|version)\s*=\s*"([^"]+)"\s*(?:#.*)?$')
 
 
-def parse_pyproject_version(pyproject_path):
+def parse_pyproject_version(pyproject_path: Path) -> str | None:
     """Return the [project] version from a pyproject.toml, or None.
 
     None when the file is absent, unreadable, does not declare the
@@ -50,8 +52,8 @@ def parse_pyproject_version(pyproject_path):
         return None
 
     in_project = False
-    name = None
-    version = None
+    name: str | None = None
+    version: str | None = None
     for raw_line in text.splitlines():
         line = raw_line.strip()
         if line.startswith("["):
@@ -75,7 +77,7 @@ def parse_pyproject_version(pyproject_path):
     return version
 
 
-def resolve_version():
+def resolve_version() -> str:
     """Resolve the canonical package version. Raises RuntimeError when the
     installation is too broken to know it (no checkout pyproject.toml and no
     installed distribution metadata)."""
