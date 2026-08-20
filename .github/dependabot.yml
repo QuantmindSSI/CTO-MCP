@@ -20,3 +20,11 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
+    ignore:
+      # The tree-sitter pins are a verified ABI compatibility matrix, not
+      # freshness debt: py-tree-sitter 0.23.x rejects grammar ABI 15, which
+      # newer grammar wheels ship (rationale in pyproject.toml; PR #2 proved
+      # it - every [ast] CI leg failed on the proposed widening). These move
+      # only by hand, re-verified against the interpreter floor.
+      - dependency-name: "tree-sitter"
+      - dependency-name: "tree-sitter-*"

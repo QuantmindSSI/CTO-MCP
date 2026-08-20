@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ruff at the pinned version
-        run: pip install --disable-pip-version-check "ruff==0.16.2"
+        run: pip install --disable-pip-version-check "ruff==0.16.3"
       - run: ruff check .
       - run: ruff format --check .
 
@@ -77,21 +77,16 @@ jobs:
         run: python tools/benchmark_scanner.py
 
   # The OS matrix the README implies (developer laptops) is tested, not
-  # assumed. macOS is a required check. Windows is informational until it
-  # has a green history: continue-on-error surfaces real signal without
-  # letting an unproven runner hold main hostage - flip it to required once
-  # it has been green for a few weeks.
+  # assumed. Both legs are required checks: Windows served its
+  # informational apprenticeship (its first run found and fixed a POSIX
+  # execute-bit assumption in the hook-installer test) and has been green
+  # since, so it now gates like everything else.
   os-compat:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-latest
-            informational: false
-          - os: windows-latest
-            informational: true
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.informational }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -107,10 +102,11 @@ jobs:
   coverage:
     # A measurement with a ratchet, not a vanity target: fail-under only
     # ever rises (raise it when the measured number rises; never lower it).
-    # Measured 87% on first-party code at the time the gate was added; the
-    # floor sits one point under to absorb line-attribution variance across
-    # interpreter releases. The scan-budget wall-clock tests self-skip under
-    # the tracer, so this job measures correctness paths, not stopwatches.
+    # Ratchet history: 87% measured at introduction (floor 86); 88% after
+    # the mutation-gap tests (floor 87). The floor sits one point under the
+    # measurement to absorb line-attribution variance across interpreter
+    # releases. The scan-budget wall-clock tests self-skip under the
+    # tracer, so this job measures correctness paths, not stopwatches.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -122,7 +118,7 @@ jobs:
       - name: Run the suite under coverage
         run: python -m coverage run --source=persona_constitution -m unittest discover -s tests
       - name: Enforce the coverage floor
-        run: python -m coverage report --fail-under=86
+        run: python -m coverage report --fail-under=87
 
   packaging:
     # Guards the defect where the wheel shipped without CONSTITUTION.md and the
