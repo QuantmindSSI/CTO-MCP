@@ -49,6 +49,16 @@ PATHOLOGICAL_CASES = {
 class TestScannerTimeBudget(unittest.TestCase):
     """No admissible input may push the scanner into hang-class runtime."""
 
+    def setUp(self):
+        # Wall-clock budgets are meaningless under a tracer: coverage
+        # instrumentation multiplies the scanner's regex/AST loops by one to
+        # two orders of magnitude, so the same inputs that pass in seconds
+        # here would time a coverage job out entirely. The detection-contract
+        # tests below still run under coverage; only the stopwatch is
+        # disarmed.
+        if sys.gettrace() is not None or "coverage" in sys.modules:
+            self.skipTest("wall-clock budgets are meaningless under a tracer")
+
     def test_pathological_inputs_complete_within_budget(self):
         for name, code in PATHOLOGICAL_CASES.items():
             with self.subTest(case=name):

@@ -47,6 +47,16 @@ import tokenize
 
 from codebase_csi.analyzers.mock_detector import MockCodeDetector
 
+# Every way CPython's parser refuses input. SyntaxError and ValueError are
+# the documented refusals; MemoryError is the parser-stack overflow raised
+# by 3.12+ on pathologically deep expressions ("Parser stack overflowed"),
+# and RecursionError is the same failure on older interpreters. All four
+# mean exactly one thing here: this text is not analysable as Python, so
+# the scan proceeds with the non-AST engines instead of crashing.
+# Found by the adversarial corpus in tests/test_scan_budget.py: the
+# modifier-keyword flood killed scan_code with MemoryError on CPython 3.12.
+PARSER_REFUSALS = (SyntaxError, ValueError, MemoryError, RecursionError)
+
 try:
     from .ast_bridge import xast_findings
     from .logic_rules import python_logic_findings
@@ -331,7 +341,7 @@ def _python_data_string_spans(code):
     """
     try:
         tree = ast.parse(code)
-    except (SyntaxError, ValueError):
+    except PARSER_REFUSALS:
         return []
 
     docstring_spans = set()
@@ -474,7 +484,7 @@ def _python_ast_findings(code):
     """
     try:
         tree = ast.parse(code)
-    except (SyntaxError, ValueError):
+    except PARSER_REFUSALS:
         return []
 
     findings = python_logic_findings(tree)
@@ -563,7 +573,7 @@ def _is_python(code, language):
     try:
         ast.parse(code)
         return True
-    except (SyntaxError, ValueError):
+    except PARSER_REFUSALS:
         return False
 
 
@@ -584,7 +594,7 @@ def _python_trigger_docstring_ranges(code):
     """
     try:
         tree = ast.parse(code)
-    except (SyntaxError, ValueError):
+    except PARSER_REFUSALS:
         return None
     ranges = []
     for node in ast.walk(tree):
