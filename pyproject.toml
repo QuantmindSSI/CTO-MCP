@@ -31,7 +31,7 @@ classifiers = [
 [project.optional-dependencies]
 # Pinned exactly: an unpinned linter turns an upstream release into a red build
 # on a commit that changed nothing. Bump deliberately.
-dev = ["ruff==0.16.2"]
+dev = ["ruff==0.16.3"]
 # Optional tree-sitter tier for the vendored CodebaseCSI ASTParser. Without it
 # the scanner still runs: Python uses the stdlib ast engine and other languages
 # fall back to the constitution's structural regex rules.
@@ -46,15 +46,15 @@ dev = ["ruff==0.16.2"]
 # language(), which the vendored loader treats as unavailable and routes to
 # the regex fallback.
 ast = [
-  "tree-sitter>=0.23,<0.24",
-  "tree-sitter-python>=0.23,<0.24",
-  "tree-sitter-javascript>=0.23,<0.24",
+  "tree-sitter>=0.23,<0.27",
+  "tree-sitter-python>=0.23,<0.26",
+  "tree-sitter-javascript>=0.23,<0.26",
   "tree-sitter-typescript>=0.23,<0.24",
   "tree-sitter-java>=0.23,<0.24",
-  "tree-sitter-go>=0.23,<0.24",
-  "tree-sitter-rust>=0.23,<0.23.3",
+  "tree-sitter-go>=0.23,<0.26",
+  "tree-sitter-rust>=0.23,<0.24.3",
   "tree-sitter-ruby>=0.23,<0.24",
-  "tree-sitter-c>=0.23,<0.23.5",
+  "tree-sitter-c>=0.23,<0.24.3",
   "tree-sitter-cpp>=0.23,<0.24",
 ]
 
