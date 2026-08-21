@@ -55,12 +55,14 @@ from typing import (
 # report clean results for code it never actually inspected.
 try:
     from ._version import __version__
+    from .dependencies import verify_dependencies
     from .review.engine import review_patch
     from .scanner import scan_code
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     try:
         from persona_constitution._version import __version__
+        from persona_constitution.dependencies import verify_dependencies
         from persona_constitution.review.engine import review_patch
         from persona_constitution.scanner import scan_code
     except ImportError as _scanner_error:
@@ -484,6 +486,45 @@ def tool_review_patch(constitution: str, args: dict[str, Any]) -> str:  # noqa: 
     return json.dumps(result, indent=2)
 
 
+def tool_verify_dependencies(constitution: str, args: dict[str, Any]) -> str:  # noqa: ARG001 - uniform handler signature
+    """Verify that a change's external dependencies exist on their registry.
+
+    The only tool here that performs network I/O, and it says so in its
+    advertised description: package names (nothing else) go to pypi.org /
+    registry.npmjs.org, bounded per dependencies.py. `constitution` is
+    unused: existence is a property of registries, not of the corpus.
+    """
+    code = args.get("code")
+    diff_text = args.get("diff")
+    if (code is None) == (diff_text is None):
+        raise ValueError("Supply exactly one of 'code' (with 'language') or 'diff'.")
+    if code is not None:
+        if not isinstance(code, str) or not code.strip():
+            raise ValueError("Argument 'code' must be a non-empty string.")
+        if len(code) > MAX_SCAN_BYTES:
+            raise ValueError(
+                f"Argument 'code' exceeds the {MAX_SCAN_BYTES // 1_000_000}MB limit; verify files individually."
+            )
+    if diff_text is not None:
+        if not isinstance(diff_text, str) or not diff_text.strip():
+            raise ValueError("Argument 'diff' must be a non-empty unified diff string.")
+        if len(diff_text) > MAX_REVIEW_DIFF_CHARS:
+            raise ValueError(
+                f"Argument 'diff' is {len(diff_text)} characters, over the {MAX_REVIEW_DIFF_CHARS} "
+                "limit; verify the change in smaller units."
+            )
+    language = args.get("language")
+    if language is not None and not isinstance(language, str):
+        raise ValueError("Argument 'language' must be a string when supplied.")
+    result = verify_dependencies(
+        code=code,
+        language=language,
+        diff=diff_text,
+        exclude=_require_string_list(args, "exclude"),
+    )
+    return json.dumps(result, indent=2)
+
+
 TOOLS: dict[str, dict[str, Any]] = {
     "get_constitution": {
         "handler": tool_get_constitution,
@@ -640,6 +681,54 @@ TOOLS: dict[str, dict[str, Any]] = {
                 },
             },
             "required": ["diff"],
+            "additionalProperties": False,
+        },
+    },
+    "verify_dependencies": {
+        "handler": tool_verify_dependencies,
+        "description": (
+            "Verify that every external dependency introduced by code or a diff actually exists "
+            "on its public registry - the mechanical half of gate G4 (Dependency Honesty). LLMs "
+            "hallucinate package names and attackers register them (slopsquatting), so a missing "
+            "registry entry is both an incompleteness defect and a supply-chain risk. Extracts "
+            "imports (Python via AST incl. importlib/__import__ literals; JS/TS via import/"
+            "require specifiers), classifies stdlib/Node built-ins/first-party-in-diff/excluded "
+            "locally, then checks the rest against PyPI (PEP 503) and the npm registry. NETWORK "
+            "NOTICE: this is the only tool here that touches the network - package names and "
+            "nothing else are sent over HTTPS, bounded (50 packages/call, 10s timeout, 3 "
+            "attempts). Verdicts: FAIL = something does not exist (hallucinated/misspelled); "
+            "REVIEW = unverifiable (offline/registry errors - never silently passed); PASS = "
+            "everything resolves. Existence only: version pinning and integrity stay with the "
+            "reviewer."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "description": "Source text to extract imports from (requires 'language').",
+                },
+                "language": {
+                    "type": "string",
+                    "enum": ["python", "javascript", "typescript"],
+                    "description": "Language of 'code'.",
+                },
+                "diff": {
+                    "type": "string",
+                    "description": (
+                        "Unified diff; imports are extracted from added lines of Python/JS/TS "
+                        "files with new-file line numbers. Exactly one of 'code' and 'diff'."
+                    ),
+                },
+                "exclude": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "fnmatch globs for package names that must never be sent to a registry "
+                        "(private/internal packages)."
+                    ),
+                },
+            },
             "additionalProperties": False,
         },
     },

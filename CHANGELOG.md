@@ -5,6 +5,40 @@ All notable changes to persona-constitution-mcp. The format follows
 semantic versioning. Each release's section is what the release workflow
 publishes as the release notes - a tag with no section here does not ship.
 
+## [3.6.0] - 2026-08-20
+
+Gate G4 (Dependency Honesty) gets its mechanical half: hallucinated-
+package detection. LLMs invent package names and attackers register them
+("slopsquatting"), so an import that does not exist on its registry is
+both an incompleteness defect and a supply-chain attack surface - and it
+is now detected, not just judged.
+
+### Added
+
+- **`verify_dependencies` MCP tool** (`persona_constitution/dependencies.py`):
+  extracts imports from source (Python via AST including literal-argument
+  `importlib.import_module`/`__import__`; JS/TS via import/export/require
+  specifiers) or from a unified diff's added lines with new-file line
+  numbers, classifies the cheap-and-private tiers locally (caller-excluded
+  globs, Python stdlib incl. a frozen 3.9-floor fallback, Node built-ins,
+  modules the diff itself provides), and verifies the remainder against
+  PyPI (PEP 503 simple index) and the npm registry. A curated alias table
+  resolves the well-known import-name/distribution mismatches
+  (yaml -> PyYAML, cv2 -> opencv-python, ...) as `exists-as`.
+- **Network honesty as a contract.** This is the package's only
+  network-touching tool besides the GitHub client, and its advertised
+  description says so: package names and nothing else leave the machine,
+  bounded (50 packages/call, 10s timeout, 3 attempts, backoff). A 404 is
+  `missing` -> FAIL; timeouts/5xx/429/offline are `unverifiable` -> REVIEW,
+  never a silent PASS. `scan_code` and `review_patch` remain fully
+  offline.
+- The reviewing agent's protocol now calls `verify_dependencies` for
+  G4's existence half; pinning and intent remain judgement.
+- 29 hermetic tests: extraction forms, tier ordering (local tiers
+  provably never query), alias resolution, verdict precedence, retry
+  behaviour at the single network egress, diff line mapping, and the
+  tool's boundary validation. The module joins the nightly mutation run.
+
 ## [3.5.0] - 2026-08-20
 
 The interoperability release: findings speak the industry's language.
@@ -208,6 +242,7 @@ attested, and published from the same bytes.
 - Scanner accuracy benchmark with an environment-aware regression
   baseline (`tools/benchmark_scanner.py`).
 
+[3.6.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.5.0...v3.6.0
 [3.5.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.1...v3.4.0
 [3.3.1]: https://github.com/QuantmindSSI/CTO-MCP/compare/v3.3.0...v3.3.1

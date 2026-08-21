@@ -147,6 +147,7 @@ Any client that speaks MCP over stdio works. Claude Desktop (`claude_desktop_con
 | `get_verification_gates` | none | The G1–G5 pre-emission gates and the prohibited-marker checklist |
 | `scan_code_for_violations` | `code` (required), `language` (optional) | JSON verdict `PASS` / `REVIEW` / `FAIL` with line-numbered findings |
 | `review_patch` | `diff` (required), `files` (optional map path → content), `exclude` (optional globs), `require_tests` (`off`/`warn`/`fail`), `test_globs` (optional globs) | Diff-aware review JSON: per-file findings attributed to changed lines, pre-existing debt counted separately, C-03 test-presence policy, verdict `PASS` / `REVIEW` / `FAIL` |
+| `verify_dependencies` | exactly one of `code` (+`language`) or `diff`; `exclude` (optional globs) | G4 made mechanical: extracts imports (Python AST, JS/TS specifiers), classifies stdlib/built-ins/first-party locally, then verifies the rest exist on PyPI/npm. Hallucinated packages (slopsquatting surface) → `FAIL`; offline/unverifiable → `REVIEW`, never a silent pass. The only tool that touches the network — package names and nothing else |
 
 ### `section` values for `get_constitution`
 

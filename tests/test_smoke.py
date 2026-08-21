@@ -34,6 +34,7 @@ EXPECTED_TOOLS = {
     "get_verification_gates",
     "scan_code_for_violations",
     "review_patch",
+    "verify_dependencies",
 }
 
 
