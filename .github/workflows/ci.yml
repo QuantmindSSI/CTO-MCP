@@ -103,7 +103,8 @@ jobs:
     # A measurement with a ratchet, not a vanity target: fail-under only
     # ever rises (raise it when the measured number rises; never lower it).
     # Ratchet history: 87% measured at introduction (floor 86); 88% after
-    # the mutation-gap tests (floor 87). The floor sits one point under the
+    # the mutation-gap tests (floor 87); 89% after verify_dependencies
+    # shipped with its hermetic suite (floor 88). The floor sits one point under the
     # measurement to absorb line-attribution variance across interpreter
     # releases. The scan-budget wall-clock tests self-skip under the
     # tracer, so this job measures correctness paths, not stopwatches.
@@ -118,7 +119,7 @@ jobs:
       - name: Run the suite under coverage
         run: python -m coverage run --source=persona_constitution -m unittest discover -s tests
       - name: Enforce the coverage floor
-        run: python -m coverage report --fail-under=87
+        run: python -m coverage report --fail-under=88
 
   packaging:
     # Guards the defect where the wheel shipped without CONSTITUTION.md and the
