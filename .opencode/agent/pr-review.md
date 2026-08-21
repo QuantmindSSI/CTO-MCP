@@ -95,7 +95,14 @@ LAYER 3 - GATES AND DIMENSIONS (yours, additive only)
   the new logic with concrete values. Check every loop bound and every
   error path (Power of 10 rules 2 and 7).
 - G4 Dependency honesty - every import, call, schema, and config the change
-  references exists in the repo or its declared dependencies.
+  references exists in the repo or its declared dependencies. For the
+  existence half, call the `verify_dependencies` tool with the PR diff:
+  a `missing` package is a hallucinated or misspelled dependency (and a
+  slopsquatting surface) - treat it as a violation with its file:line.
+  `unverifiable` means the registry gave no answer; say so rather than
+  assuming either way. The tool checks existence only - whether the
+  version is pinned and the package is the one intended stays your
+  judgement.
 - G5 Problem fit - solves the stated problem at the stated scale, not a
   simpler adjacent one.
 - The nine dimensions: correctness, security (injection, secrets, trust
