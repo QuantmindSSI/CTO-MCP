@@ -64,7 +64,7 @@ runs:
   steps:
     # SHA-pinned: consumers of this action inherit this dependency, so a
     # mutable tag here would be a supply-chain hole in their pipelines too.
-    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+    - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -129,6 +129,6 @@ runs:
     # annotations path above already carries the findings for them.
     - name: Upload SARIF to code scanning
       if: inputs.sarif-file != '' && github.event.pull_request.head.repo.fork != true
-      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4
+      uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4
       with:
         sarif_file: ${{ inputs.sarif-file }}
