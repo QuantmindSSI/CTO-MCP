@@ -13,6 +13,7 @@ dist/
 .venv/
 venv/
 env/
+temp_auto_push.bat
 
 # Test and type-checker caches
 .pytest_cache/
@@ -24,9 +25,10 @@ htmlcov/
 # Editor and OS noise
 .DS_Store
 .idea/
-.vscode/
 *.swp
 
 # mutmut mutation-testing sandbox and cache
 mutants/
 .mutmut-cache
+.gitignore
+branch_structure.json
